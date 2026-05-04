@@ -41,12 +41,15 @@ describe("PATCH /api/settings exposes enabledSourceIds as user-level", () => {
     expect(src).toMatch(/enabled_source_ids = \?/);
   });
 
-  it("filters unknown source IDs against the registry rather than rejecting them", async () => {
+  it("filters unknown source IDs against the canonical SourceId set rather than rejecting them", async () => {
     const src = await read("src/worker/routes/settings.ts");
     // A typo or a removed provider must not brick the PATCH — drop
     // unknown IDs silently so settings keep persisting cleanly.
-    expect(src).toMatch(/sourceRegistry\.getAll\(\)/);
-    expect(src).toMatch(/knownIds\.has/);
+    // Validation is now against the canonical literal union from
+    // `shared/sources.ts` (single source of truth) rather than a
+    // runtime registry lookup.
+    expect(src).toMatch(/from "\.\.\/\.\.\/shared\/sources/);
+    expect(src).toMatch(/isSourceId\(id\)/);
   });
 
   it("keeps enabledSourceIds OUT of the admin-only fields gate", async () => {
@@ -66,9 +69,12 @@ describe("UserContext loads enabled_source_ids from user_settings", () => {
     expect(src).toContain("enabledSourceIds");
   });
 
-  it("UserSettings type carries enabledSourceIds", async () => {
+  it("UserSettings type carries enabledSourceIds typed as the canonical SourceId union", async () => {
     const src = await read("src/worker/types.ts");
-    expect(src).toMatch(/enabledSourceIds\?:\s*string\[\]/);
+    // SourceId[] (literal union from shared/sources.ts) catches typo'd
+    // ids at compile time — `string[]` is too loose and was the shape
+    // that let the 0004 → 0005 incident_io regression slip through.
+    expect(src).toMatch(/enabledSourceIds\?:\s*SourceId\[\]/);
   });
 });
 

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { SourceId } from "../../../shared/sources";
 import type { PreviewSourceState } from "../../hooks/useSettings";
 import { useSettingsCtx } from "./SettingsContext";
 
@@ -30,7 +31,7 @@ export function PanelHeader({ title, description }: { title: string; description
  * (channels, repos, statuses) when the toggle is off, since those
  * settings are irrelevant if the source isn't fanning into briefings.
  */
-export function useSourceEnabled(sourceId: string): {
+export function useSourceEnabled(sourceId: SourceId): {
   enabled: boolean;
   setEnabled: (next: boolean) => void;
 } {
@@ -38,7 +39,7 @@ export function useSourceEnabled(sourceId: string): {
   const { settings: data, updateSettings } = settings;
   const enabled = (data?.enabledSourceIds ?? []).includes(sourceId);
   const setEnabled = (next: boolean) => {
-    const current = new Set(data?.enabledSourceIds ?? []);
+    const current = new Set<SourceId>(data?.enabledSourceIds ?? []);
     if (next) current.add(sourceId);
     else current.delete(sourceId);
     updateSettings({ enabledSourceIds: Array.from(current) });

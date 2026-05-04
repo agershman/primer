@@ -207,7 +207,13 @@ export async function generateDailyBriefing(
     // code paths / tests); an empty list means the user has explicitly
     // opted out of everything and the briefing builds with no work
     // context, which the rest of the pipeline already handles.
-    const enabledSourceIds = new Set(userSettings?.enabledSourceIds ?? []);
+    // Narrow `SourceId[]` to a generic `Set<string>` for the
+    // membership check — `provider.id` on the SourceProvider
+    // interface is `string` (the registry predates the canonical
+    // literal union), so this hop avoids a type-incompatible
+    // `Set<SourceId>` lookup. Runtime semantics are identical: a
+    // provider whose id isn't in the user's opt-in list is skipped.
+    const enabledSourceIds: Set<string> = new Set(userSettings?.enabledSourceIds ?? []);
     const singletonProviders = sourceRegistry.getSingletons(env).filter((p) => enabledSourceIds.has(p.id));
     const fetchCtx: SourceFetchContext = {
       env,
