@@ -70,8 +70,7 @@ export const SOURCE_DESCRIPTIONS: Record<SourceId, string> = {
   linear: "Issues and projects from Linear — surfaces engineering work in flight.",
   slack: "Recent Slack threads — captures cross-team discussion and decisions.",
   github: "Recent GitHub PRs and issues — surfaces what your engineers are shipping.",
-  incident_io:
-    "Active and recent incidents from incident.io — high-signal context for SREs and platform engineers.",
+  incident_io: "Active and recent incidents from incident.io — high-signal context for SREs and platform engineers.",
   hn: "Hacker News story feeds — broad tech news and discussion.",
   rss: "Configured RSS / Atom feeds — vendor blogs, conference proceedings, newsletters.",
   arxiv: "ArXiv paper feeds — research-heavy, useful for ML / systems researchers.",

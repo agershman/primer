@@ -37,6 +37,16 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # `wrangler.api.toml` is gitignored (operators copy from the
+      # example and edit per deployment), but a few tests
+      # (`tests/unit/wrangler-config.test.ts`) read it directly to
+      # pin operational + auth-posture invariants. Copy the example
+      # into place so those tests have a file to read against —
+      # the example carries the same production posture the tests
+      # assert (cpu_ms = 300000, cloudflare-access mode, allowlist).
+      - name: Bootstrap wrangler.api.toml from example (for tests)
+        run: cp wrangler.api.example.toml wrangler.api.toml
+
       - name: Lint (Biome)
         run: bun run lint
 
