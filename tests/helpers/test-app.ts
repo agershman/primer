@@ -12,16 +12,23 @@ import type { FakeD1 } from "./d1-fake";
  * like `isAdmin` or `userId` to exercise admin gating without
  * spinning up a real auth provider.
  *
- * The `db` and any other env bindings get attached to `c.env` so
- * routes that read `c.env.DB` work unchanged. Cast `FakeD1 as
- * unknown as D1Database` at the call site — the surface our routes
- * touch (prepare/bind/run/first/all) is faithfully implemented.
+ * Two flavours of D1 are accepted by the same helper:
+ *
+ *   • `FakeD1` (better-sqlite3 in-memory) — used by the cheap
+ *     node-pool integration tests under `tests/unit/`.
+ *   • `D1Database` (real workerd-managed binding) — used by the
+ *     workers-pool integration tests under `tests/integration/`,
+ *     which run inside `@cloudflare/vitest-pool-workers`.
+ *
+ * Both implement the `prepare/bind/run/first/all` surface our
+ * route code touches, so the helper's body doesn't need to know
+ * which one it has.
  */
 
 type AppEnv = { Bindings: Env; Variables: { user: UserContext } };
 
 export interface BuildAppOptions {
-  db: FakeD1;
+  db: FakeD1 | D1Database;
   /** Per-request user. Tests typically override `isAdmin` and
    *  `userId`. The settings reader assumes a non-null `settings`
    *  object — we provide a minimal default. */

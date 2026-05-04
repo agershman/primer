@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   check:
-    name: Lint, typecheck, unit + integration test, build
+    name: Lint, typecheck, test (node + workers pools), build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -53,11 +53,18 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      # Vitest covers the unit tier (source-text contracts) plus the
-      # integration tier added alongside this: in-memory D1 route
-      # tests via better-sqlite3 + Hono test-app, and React Testing
-      # Library component tests for the Settings panels and the
-      # onboarding wizard. All pure node — no Cloudflare account.
+      # `vitest run` runs both projects defined in vitest.config.ts:
+      #
+      #   • node — source-text contracts, the better-sqlite3-backed
+      #     integration tier, and the React Testing Library
+      #     component tests under jsdom.
+      #   • workers — the workerd-backed pool from
+      #     @cloudflare/vitest-pool-workers, exercising real D1
+      #     bindings against the actual migration chain. workerd
+      #     ships as a regular npm dep, so no extra setup is
+      #     needed beyond `bun install`.
+      #
+      # Both run on plain ubuntu-latest. No Cloudflare account.
       - name: Test
         run: bun x vitest run
 
