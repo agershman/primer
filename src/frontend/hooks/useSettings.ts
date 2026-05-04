@@ -106,6 +106,13 @@ export interface UserSettingsData {
   signalSurfaceMap: SignalSurfaceMap;
   filterPrompt: string | null;
   sourceFilterOverrides: Record<string, string>;
+  /**
+   * Per-user opt-in list of source IDs (e.g. `["linear", "rss"]`).
+   * Sources not in this list don't fan into the user's briefing.
+   * Brand-new users land on `[]`; existing users were backfilled
+   * with everything in migration 0004.
+   */
+  enabledSourceIds: string[];
 }
 
 export interface AvailableModel {
@@ -267,6 +274,7 @@ const DEFAULT_SETTINGS: UserSettingsData = {
   },
   filterPrompt: null,
   sourceFilterOverrides: {},
+  enabledSourceIds: [],
 };
 
 export function useSettings(): UseSettingsResult {
@@ -310,6 +318,7 @@ export function useSettings(): UseSettingsResult {
       },
       filterPrompt: s.filterPrompt ?? null,
       sourceFilterOverrides: s.sourceFilterOverrides ?? {},
+      enabledSourceIds: Array.isArray(s.enabledSourceIds) ? s.enabledSourceIds : [],
     };
   }, []);
 

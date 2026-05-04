@@ -549,10 +549,13 @@ describe("concept sparklines (real depth history, not placeholder)", () => {
 });
 
 describe("first-run onboarding + in-flow focus editing", () => {
-  it("FirstRunSetup walks the user through About then Focus with skip option", async () => {
+  it("FirstRunSetup walks the user through About then Focus then Sources with skip option", async () => {
     const src = await read("src/frontend/components/FirstRunSetup.tsx");
-    // Three-step flow: intro → about → focus (then internal "done").
-    expect(src).toMatch(/type Step\s*=\s*"intro"\s*\|\s*"about"\s*\|\s*"focus"\s*\|\s*"done"/);
+    // Four-step flow: intro → about → focus → sources (then internal "done").
+    // The sources step lets the user opt in to which sources fan into
+    // their briefing — AI suggestions visually highlight the recommended
+    // ones, but every checkbox starts unchecked and the user picks.
+    expect(src).toMatch(/type Step\s*=\s*"intro"\s*\|\s*"about"\s*\|\s*"focus"\s*\|\s*"sources"\s*\|\s*"done"/);
     // Hits the existing endpoints — no new write surface.
     expect(src).toContain('apiPost("/api/me/about"');
     expect(src).toContain('apiPost("/api/me/focus"');

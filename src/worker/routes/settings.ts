@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { createLinearClient, fetchTeams } from "../integrations/linear.js";
 import { SlackClient } from "../integrations/slack.js";
+import { sourceRegistry } from "../sources/index.js";
 import type { Env, UserContext } from "../types.js";
 
 type AppEnv = { Bindings: Env; Variables: { user: UserContext } };
@@ -108,6 +109,24 @@ settingsRoutes.patch("/settings", async (c) => {
     binds.push(JSON.stringify(sourceFilterOverrides));
   }
 
+  // Per-user opt-in list of source IDs. User-level on purpose: this
+  // governs what shows up in THIS user's briefing, not what the
+  // deployment fetches. Validate against the live registry so a typo
+  // can't quietly disable a real source — unknown IDs are dropped
+  // rather than rejected, because the registry can shrink (a provider
+  // file gets removed) and we don't want stale entries to brick the
+  // settings PATCH.
+  const enabledSourceIds = body.enabledSourceIds ?? body.enabled_source_ids;
+  if (enabledSourceIds !== undefined) {
+    if (!Array.isArray(enabledSourceIds)) return c.json({ error: "enabledSourceIds must be an array of strings" }, 400);
+    if (!enabledSourceIds.every((v) => typeof v === "string"))
+      return c.json({ error: "enabledSourceIds must contain only strings" }, 400);
+    const knownIds = new Set(sourceRegistry.getAll().map((p) => p.id));
+    const cleaned = Array.from(new Set((enabledSourceIds as string[]).filter((id) => knownIds.has(id))));
+    updates.push("enabled_source_ids = ?");
+    binds.push(JSON.stringify(cleaned));
+  }
+
   if (updates.length === 0) {
     return c.json({ settings: user.settings });
   }
@@ -129,11 +148,22 @@ settingsRoutes.patch("/settings", async (c) => {
     source_config: string;
     filter_prompt: string | null;
     source_filter_overrides: string | null;
+    enabled_source_ids: string | null;
   }>();
 
   let overrides: Record<string, string> = {};
   try {
     if (settingsRow?.source_filter_overrides) overrides = JSON.parse(settingsRow.source_filter_overrides);
+  } catch {
+    /* ignore */
+  }
+
+  let updatedEnabledSourceIds: string[] = [];
+  try {
+    if (settingsRow?.enabled_source_ids) {
+      const parsed = JSON.parse(settingsRow.enabled_source_ids);
+      if (Array.isArray(parsed)) updatedEnabledSourceIds = parsed.filter((v): v is string => typeof v === "string");
+    }
   } catch {
     /* ignore */
   }
@@ -149,6 +179,7 @@ settingsRoutes.patch("/settings", async (c) => {
       : user.settings.signalSurfaceMap,
     filterPrompt: settingsRow?.filter_prompt ?? null,
     sourceFilterOverrides: overrides,
+    enabledSourceIds: updatedEnabledSourceIds,
   };
 
   return c.json({ settings: updatedSettings });

@@ -163,3 +163,121 @@ Output JSON with this exact shape (no other keys, no prose):
   }
   return cleaned.slice(0, limit);
 }
+
+/**
+ * AI-driven recommendation for which built-in source *kinds* a user
+ * should enable. Distinct from `suggestSourceInstances` (which
+ * proposes RSS feed URLs); this one looks at the user's persona +
+ * focus and decides whether each registered source kind (linear,
+ * slack, github, incident-io, hn, rss, arxiv) is likely to be useful
+ * for them.
+ *
+ * The output drives the visual highlight on the onboarding "sources"
+ * step: every available source is shown to the user with checkboxes
+ * unchecked, and the recommended ones get a sparkle + the rationale
+ * as helper text. The user always picks; the AI never auto-selects.
+ *
+ * Fail-safe: when the LLM call fails or returns nothing parseable,
+ * we return an empty list. The onboarding UI degrades to "no
+ * suggestions, all sources shown plainly" rather than blocking.
+ */
+export interface EnabledSourceSuggestion {
+  id: string;
+  recommended: boolean;
+  rationale: string;
+}
+
+export interface AvailableSourceForSuggest {
+  id: string;
+  name: string;
+  /** Short hint about what this source contributes (used in the
+   *  prompt so the model can reason about fit). */
+  description?: string;
+}
+
+export interface SuggestEnabledSourcesOptions {
+  modelSpec?: ModelSpec;
+  aboutStatement?: string | null;
+  focusStatement?: string | null;
+}
+
+export async function suggestEnabledSources(
+  db: D1Database,
+  userId: string,
+  llm: LLMClient,
+  available: AvailableSourceForSuggest[],
+  options: SuggestEnabledSourcesOptions = {},
+): Promise<EnabledSourceSuggestion[]> {
+  if (available.length === 0) return [];
+
+  const spec = options.modelSpec ?? defaultSuggestSpec();
+  const about = options.aboutStatement?.trim() ?? "";
+  const focus = options.focusStatement?.trim() ?? "";
+
+  const aboutBlock = about
+    ? `\nABOUT THE READER:\n${about}\n`
+    : "\n(No About statement on file. Be conservative — only recommend a source when its fit is broadly applicable.)\n";
+  const focusBlock = focus ? `\nCURRENT FOCUS:\n${focus}\n` : "";
+
+  const sourceList = available
+    .map((s) => `- ${s.id}: ${s.name}${s.description ? ` — ${s.description}` : ""}`)
+    .join("\n");
+
+  const system = `You decide which work-signal sources a single technical reader should enable.
+Each source is either ON (fans into their daily learning briefing) or OFF.
+
+For each source listed, decide whether it's a good fit for THIS reader based on the persona and focus
+below. Bias toward fewer recommendations: a salesperson does not need incidents, an SRE does not need
+sales-only feeds. When in doubt about fit, recommend OFF.
+
+Respond with valid JSON only:
+{
+  "suggestions": [
+    { "id": "<source-id>", "recommended": true | false, "rationale": "one short sentence" }
+  ]
+}
+
+The "id" field MUST exactly match one of the source ids provided. Include every source from the list
+exactly once. The "rationale" should be one short sentence aimed at the reader (e.g. "You mentioned
+running incidents in your About — these will surface high-signal context.").`;
+
+  const userMessage = `Available sources:\n${sourceList}\n${aboutBlock}${focusBlock}`;
+
+  let result: { suggestions?: EnabledSourceSuggestion[] };
+  let usage: NormalizedUsage;
+  try {
+    const response = await llm.generateJson<{ suggestions?: EnabledSourceSuggestion[] }>({
+      spec,
+      system,
+      user: userMessage,
+    });
+    result = response.result;
+    usage = response.usage;
+  } catch (err) {
+    console.warn("[source-suggester] enabled-sources LLM call failed:", err);
+    return [];
+  }
+
+  await recordTokenUsage(db, userId, "enabled_source_suggest", spec, usage);
+
+  const validIds = new Set(available.map((s) => s.id));
+  const seen = new Set<string>();
+  const out: EnabledSourceSuggestion[] = [];
+  for (const s of Array.isArray(result.suggestions) ? result.suggestions : []) {
+    if (!s || typeof s !== "object") continue;
+    if (typeof s.id !== "string" || !validIds.has(s.id) || seen.has(s.id)) continue;
+    seen.add(s.id);
+    out.push({
+      id: s.id,
+      recommended: s.recommended === true,
+      rationale: typeof s.rationale === "string" ? s.rationale.trim() : "",
+    });
+  }
+  // Backfill any sources the LLM dropped, defaulting to "not
+  // recommended" with no rationale. Means the UI can render the full
+  // list deterministically without a separate "missing" branch.
+  for (const src of available) {
+    if (!seen.has(src.id)) out.push({ id: src.id, recommended: false, rationale: "" });
+  }
+  return out;
+}

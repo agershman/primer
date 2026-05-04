@@ -50,6 +50,10 @@ export interface SourceDescriptor {
   name: string;
   multiInstance: boolean;
   settingsManifest: SettingsManifest | null;
+  /** Short, neutral one-liner describing what this source contributes
+   *  — surfaced in the Sources overview panel as helper text under
+   *  each toggle. `null` for sources with no description. */
+  description?: string | null;
   /** Configured instances for multi-instance providers. `null` for
    *  singletons (Linear, Slack, etc.). Each instance is the unit
    *  users think about (e.g. "CNCF Blog", "Cloudflare Blog") rather

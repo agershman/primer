@@ -60,6 +60,14 @@ export interface UserSettings {
   signalSurfaceMap?: Record<string, unknown>;
   filterPrompt?: string | null;
   sourceFilterOverrides?: Record<string, string>;
+  /**
+   * Per-user opt-in list of source IDs (matches `SourceProvider.id`).
+   * Brand-new users land empty (everything off) and pick during
+   * onboarding; existing users get backfilled with the full set in
+   * migration 0004. The briefing pipeline filters singleton providers
+   * and `source_instances` against this list before fetching.
+   */
+  enabledSourceIds?: string[];
 }
 
 export function resolveFilterPrompt(settings: UserSettings, sourceId?: string): string | null {
