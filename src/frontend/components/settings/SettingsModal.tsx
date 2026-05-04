@@ -16,6 +16,7 @@ import { LimitsPanel } from "./panels/LimitsPanel";
 import { LinearPanel } from "./panels/LinearPanel";
 import { ModelsPanel } from "./panels/ModelsPanel";
 import { SlackPanel } from "./panels/SlackPanel";
+import { SourcesOverviewPanel } from "./panels/SourcesOverviewPanel";
 import { UsersPanel } from "./panels/UsersPanel";
 import { VoicePanel } from "./panels/VoicePanel";
 import { SettingsProvider, type SettingsUserProp, type TtsModelDescriptor } from "./SettingsContext";
@@ -71,6 +72,14 @@ const SOURCE_ICONS: Record<string, () => ReactNode> = {
 };
 
 const STATIC_NAV: NavEntry[] = [
+  {
+    id: "sources",
+    group: "Sources",
+    label: "Sources",
+    icon: <IconFeeds />,
+    Component: SourcesOverviewPanel,
+    keywords: ["sources", "enable", "disable", "toggle", "linear", "slack", "github", "rss", "hn", "arxiv", "incident"],
+  },
   {
     id: "feeds",
     group: "Sources",
@@ -303,11 +312,15 @@ export function SettingsModal({ settings, user, onClose, onUserChanged }: Settin
   const isAdmin = user?.isAdmin === true;
 
   // Regular users only see Personalization (About / Focus / Relevance
-  // filter) plus Account — everything else is a deployment-wide
-  // setting reserved for the admin. The server enforces the same
-  // gates on the underlying mutations, so hiding them client-side is
-  // a UX hint, not a security boundary.
-  const REGULAR_USER_PANEL_IDS = new Set(["about", "focus", "filter", "account"]);
+  // filter) plus their own Sources opt-in toggles plus Account —
+  // everything else is a deployment-wide setting reserved for the
+  // admin. The server enforces the same gates on the underlying
+  // mutations, so hiding them client-side is a UX hint, not a
+  // security boundary. `"sources"` is on the per-user list because
+  // it's the new SourcesOverviewPanel that toggles `enabledSourceIds`
+  // — a user-level field, distinct from the admin-only per-source
+  // detail panels.
+  const REGULAR_USER_PANEL_IDS = new Set(["about", "focus", "filter", "sources", "account"]);
 
   const NAV = useMemo(() => {
     const sourceEntries = buildSourceNavEntries(apiSources, sourceConfig, handleSourceConfigChange);

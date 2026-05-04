@@ -123,6 +123,7 @@ export const userContext = createMiddleware<{
     source_config: string;
     filter_prompt: string | null;
     source_filter_overrides: string | null;
+    enabled_source_ids: string | null;
   }>();
 
   let sourceFilterOverrides: Record<string, string> = {};
@@ -134,6 +135,16 @@ export const userContext = createMiddleware<{
     /* ignore malformed JSON */
   }
 
+  let enabledSourceIds: string[] = [];
+  try {
+    if (settingsRow?.enabled_source_ids) {
+      const parsed = JSON.parse(settingsRow.enabled_source_ids);
+      if (Array.isArray(parsed)) enabledSourceIds = parsed.filter((v): v is string => typeof v === "string");
+    }
+  } catch {
+    /* ignore malformed JSON — empty list means nothing fans out */
+  }
+
   const settings: UserSettings = {
     budgetCapMonthly: settingsRow?.budget_cap_monthly ?? 35,
     briefingCron: settingsRow?.briefing_cron ?? "0 5 * * 1-5",
@@ -143,6 +154,7 @@ export const userContext = createMiddleware<{
     signalSurfaceMap: settingsRow?.source_config ? JSON.parse(settingsRow.source_config) : DEFAULT_SIGNAL_SURFACE_MAP,
     filterPrompt: settingsRow?.filter_prompt ?? null,
     sourceFilterOverrides,
+    enabledSourceIds,
   };
 
   c.set("user", {

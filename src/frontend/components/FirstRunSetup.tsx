@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { apiPost } from "../utils/api";
+import type { SourceDescriptor } from "../sources/types";
+import { apiGet, apiPatch, apiPost } from "../utils/api";
 import { DictationButton } from "./DictationButton";
 import { RefineDialog } from "./RefineDialog";
+
+interface SourceSuggestion {
+  id: string;
+  recommended: boolean;
+  rationale: string;
+}
 
 /**
  * First-run onboarding overlay.
@@ -47,7 +54,7 @@ interface FirstRunSetupProps {
   onSkip: () => void;
 }
 
-type Step = "intro" | "about" | "focus" | "done";
+type Step = "intro" | "about" | "focus" | "sources" | "done";
 
 const ABOUT_PLACEHOLDER =
   "I'm a product manager with a design background. I've been in tech for 6 years and prefer clear, practical explanations — show me the 'why' and the trade-offs, not just the how. I learn best through concrete examples and analogies.";
@@ -73,6 +80,15 @@ export function FirstRunSetup({ initialAbout, initialFocus, onComplete, onSkip }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refineKind, setRefineKind] = useState<"about" | "focus" | null>(null);
+
+  // Sources step state. We render every available source the
+  // deployment exposes, with no checkbox pre-selected — the AI's role
+  // is purely advisory through `suggestionById`, which highlights the
+  // recommended ones and shows their rationale.
+  const [availableSources, setAvailableSources] = useState<Array<SourceDescriptor & { available: boolean }>>([]);
+  const [suggestionById, setSuggestionById] = useState<Record<string, SourceSuggestion>>({});
+  const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set());
+  const [sourcesLoading, setSourcesLoading] = useState(false);
 
   // If the user already had something saved, skip past the intro.
   // Without this, a partial completion would always start at intro
@@ -122,6 +138,54 @@ export function FirstRunSetup({ initialAbout, initialFocus, onComplete, onSkip }
     }
   };
 
+  // When the user lands on the sources step, fetch the available
+  // sources and the AI's recommendations in parallel. Both are
+  // soft-fetches: a registry-list failure or an LLM hiccup must not
+  // block the user from finishing onboarding, so on error we simply
+  // render an empty list (the user can pick sources later in
+  // Settings → Sources).
+  useEffect(() => {
+    if (step !== "sources") return;
+    setSourcesLoading(true);
+    Promise.allSettled([
+      apiGet<{ sources: Array<SourceDescriptor & { available: boolean }> }>("/api/sources"),
+      apiPost<{ suggestions: SourceSuggestion[] }>("/api/sources/suggest-enabled", {}),
+    ]).then((results) => {
+      if (results[0].status === "fulfilled") {
+        setAvailableSources(results[0].value.sources.filter((s) => s.available));
+      }
+      if (results[1].status === "fulfilled") {
+        const map: Record<string, SourceSuggestion> = {};
+        for (const s of results[1].value.suggestions) map[s.id] = s;
+        setSuggestionById(map);
+      }
+      setSourcesLoading(false);
+    });
+  }, [step]);
+
+  const toggleSource = (id: string) => {
+    setSelectedSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const saveSources = async (): Promise<boolean> => {
+    setSaving(true);
+    setError(null);
+    try {
+      await apiPatch("/api/settings", { enabledSourceIds: Array.from(selectedSources) });
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save source selection");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const advance = async () => {
     if (step === "intro") {
       // If About is already set (rare partial state), jump straight to focus.
@@ -135,6 +199,11 @@ export function FirstRunSetup({ initialAbout, initialFocus, onComplete, onSkip }
     }
     if (step === "focus") {
       const ok = await saveFocus();
+      if (ok) setStep("sources");
+      return;
+    }
+    if (step === "sources") {
+      const ok = await saveSources();
       if (ok) {
         setStep("done");
         onComplete();
@@ -156,15 +225,18 @@ export function FirstRunSetup({ initialAbout, initialFocus, onComplete, onSkip }
           <div className="flex items-center gap-2 mb-1">
             <Dot active={step === "intro"} done={false} />
             <div className="h-px flex-1 bg-border-subtle" />
-            <Dot active={step === "about"} done={step === "focus"} />
+            <Dot active={step === "about"} done={step === "focus" || step === "sources"} />
             <div className="h-px flex-1 bg-border-subtle" />
-            <Dot active={step === "focus"} done={false} />
+            <Dot active={step === "focus"} done={step === "sources"} />
+            <div className="h-px flex-1 bg-border-subtle" />
+            <Dot active={step === "sources"} done={false} />
           </div>
           <div className="flex items-center justify-between">
             <h1 className="font-display text-lg font-medium text-text-primary">
               {step === "intro" && "Welcome to Primer"}
               {step === "about" && "Tell us about you"}
               {step === "focus" && "What do you want to learn?"}
+              {step === "sources" && "Pick your sources"}
             </h1>
             <button
               type="button"
@@ -315,6 +387,64 @@ export function FirstRunSetup({ initialAbout, initialFocus, onComplete, onSkip }
             </div>
           )}
 
+          {step === "sources" && (
+            <div className="space-y-3">
+              <p className="font-mono text-[11px] text-text-dim leading-relaxed">
+                Pick the sources you want feeding your daily briefing. Based on what you wrote above, we've highlighted
+                a few that look like a fit — but you decide. You can change this anytime in Settings.
+              </p>
+              {sourcesLoading ? (
+                <div className="rounded-lg border border-border-subtle bg-bg-warm p-4 text-xs font-mono text-text-dim">
+                  Loading sources…
+                </div>
+              ) : availableSources.length === 0 ? (
+                <div className="rounded-lg border border-border-subtle bg-bg-warm p-4 text-xs font-mono text-text-dim">
+                  No sources are configured on this deployment yet. You can skip this step and add them later.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {availableSources.map((s) => {
+                    const sug = suggestionById[s.id];
+                    const recommended = sug?.recommended === true;
+                    const isSelected = selectedSources.has(s.id);
+                    return (
+                      <label
+                        key={s.id}
+                        className={`flex items-start gap-3 rounded-md border p-3 cursor-pointer transition-colors ${
+                          recommended
+                            ? "border-accent/40 bg-accent/5 hover:bg-accent/10"
+                            : "border-border-subtle bg-surface hover:bg-surface-hover"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSource(s.id)}
+                          className="mt-0.5 h-4 w-4 rounded border-border accent-accent shrink-0"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-text-primary">{s.name}</span>
+                            {recommended && <span className="text-[10px] font-mono text-accent">✨ suggested</span>}
+                          </div>
+                          {recommended && sug?.rationale ? (
+                            <div className="mt-0.5 text-[11px] font-mono text-text-dim leading-relaxed">
+                              {sug.rationale}
+                            </div>
+                          ) : s.description ? (
+                            <div className="mt-0.5 text-[11px] font-mono text-text-faint leading-relaxed">
+                              {s.description}
+                            </div>
+                          ) : null}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {error && (
             <div className="mt-4 rounded-md bg-negative-dim border border-negative/20 p-3 text-xs font-mono text-negative">
               {error}
@@ -326,14 +456,25 @@ export function FirstRunSetup({ initialAbout, initialFocus, onComplete, onSkip }
         <div className="shrink-0 px-6 py-3 border-t border-border-subtle flex items-center justify-between gap-2">
           <span className="font-mono text-[10px] text-text-faint">
             {step === "intro" && "Takes about 2 minutes."}
-            {step === "about" && "Step 1 of 2"}
-            {step === "focus" && "Step 2 of 2 — almost done"}
+            {step === "about" && "Step 1 of 3"}
+            {step === "focus" && "Step 2 of 3"}
+            {step === "sources" && "Step 3 of 3 — almost done"}
           </span>
           <div className="flex items-center gap-2">
             {step === "focus" && (
               <button
                 type="button"
                 onClick={() => setStep("about")}
+                disabled={saving}
+                className="px-3 py-1.5 rounded-md text-xs font-mono text-text-dim hover:text-text-primary hover:bg-surface-hover transition-colors"
+              >
+                ← Back
+              </button>
+            )}
+            {step === "sources" && (
+              <button
+                type="button"
+                onClick={() => setStep("focus")}
                 disabled={saving}
                 className="px-3 py-1.5 rounded-md text-xs font-mono text-text-dim hover:text-text-primary hover:bg-surface-hover transition-colors"
               >
@@ -348,7 +489,8 @@ export function FirstRunSetup({ initialAbout, initialFocus, onComplete, onSkip }
             >
               {step === "intro" && "Get started →"}
               {step === "about" && (saving ? "Saving…" : "Continue →")}
-              {step === "focus" && (saving ? "Saving…" : "Finish & build my first briefing")}
+              {step === "focus" && (saving ? "Saving…" : "Continue →")}
+              {step === "sources" && (saving ? "Saving…" : "Finish & build my first briefing")}
             </button>
           </div>
         </div>

@@ -199,7 +199,16 @@ export async function generateDailyBriefing(
 
     await updateProgress(db, briefingId, "work_context", "Fetching work context…");
 
-    const singletonProviders = sourceRegistry.getSingletons(env);
+    // Per-user opt-in gate. The user's `enabledSourceIds` (migration
+    // 0004) is the authoritative list of source kinds that should fan
+    // into THIS user's briefing — disabled sources skip their fetch
+    // entirely so we don't burn HTTP budget on data that gets thrown
+    // away. An undefined list means we haven't loaded settings (older
+    // code paths / tests); an empty list means the user has explicitly
+    // opted out of everything and the briefing builds with no work
+    // context, which the rest of the pipeline already handles.
+    const enabledSourceIds = new Set(userSettings?.enabledSourceIds ?? []);
+    const singletonProviders = sourceRegistry.getSingletons(env).filter((p) => enabledSourceIds.has(p.id));
     const fetchCtx: SourceFetchContext = {
       env,
       db,
@@ -426,6 +435,9 @@ export async function generateDailyBriefing(
             // CNCF Blog, Cloudflare Blog) — feeds with an override
             // get scored in their own bucket using that prompt.
             sourceFilterOverrides: userSettings?.sourceFilterOverrides ?? {},
+            // Per-user opt-in: skip source instances whose kind the
+            // user hasn't enabled.
+            enabledSourceIds: userSettings?.enabledSourceIds ?? [],
           },
           env,
         );

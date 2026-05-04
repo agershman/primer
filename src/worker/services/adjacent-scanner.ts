@@ -60,6 +60,12 @@ export interface AdjacentScanOptions {
    *  Cloudflare Blog: ignore product launches" without polluting the
    *  global filter. */
   sourceFilterOverrides?: Record<string, string>;
+  /** Per-user opt-in list of source kinds (e.g. `["rss", "hn"]`).
+   *  Source instances whose `kind` isn't in this list are skipped
+   *  entirely so a user who has opted out of, say, ArXiv doesn't pay
+   *  for fetching every ArXiv feed only to throw the items away.
+   *  When omitted (older callers / tests), every kind is allowed. */
+  enabledSourceIds?: string[];
 }
 
 function defaultAdjacentSpec(): ModelSpec {
@@ -141,8 +147,14 @@ export async function scanAdjacentSources(
 
   await seedDefaultSourceInstancesIfEmpty(db);
 
-  const sources = await listSourceInstances(db, { onlyEnabled: true });
+  const allSources = await listSourceInstances(db, { onlyEnabled: true });
   const sourceErrors: string[] = [];
+
+  // Per-user gate: only fetch instances whose `kind` (e.g. `rss`,
+  // `hn`, `arxiv`) the user has opted in to. `undefined` means "no
+  // gate" so older callers / tests keep working unchanged.
+  const enabledKinds = options.enabledSourceIds ? new Set(options.enabledSourceIds) : null;
+  const sources = enabledKinds ? allSources.filter((s) => enabledKinds.has(s.kind)) : allSources;
 
   if (sources.length === 0) {
     return { relevant: [], nearMisses: [], sourceErrors, modelUsed: spec.model };
