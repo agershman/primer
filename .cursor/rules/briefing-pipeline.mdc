@@ -1,0 +1,37 @@
+---
+description: Briefing-generation pipeline (the 9-step flow that produces a user's daily briefing)
+globs: ["src/worker/services/briefing-generator.ts", "src/worker/services/adjacent-scanner.ts", "src/worker/services/concept-extractor.ts", "src/worker/services/teaching-generator.ts", "src/worker/services/continuation-classifier.ts"]
+alwaysApply: false
+---
+
+# Briefing pipeline
+
+You are touching the briefing-generation pipeline. Before making changes, read [`.cursor/skills/add-pipeline-step/SKILL.md`](mdc:.cursor/skills/add-pipeline-step/SKILL.md) — it covers checkpointing, cancellation, error isolation, retry, and timing recording.
+
+For the bigger picture, see the pipeline mermaid diagram in [`dev-docs/architecture.md`](mdc:dev-docs/architecture.md).
+
+## Critical invariants
+
+Every pipeline step must:
+
+1. **Check cancellation at entry** via `await checkCancelled(briefingId, db)` — the user clicking Cancel sets `cancel_requested = 1`; the step must throw `CancelledError` to short-circuit.
+2. **Update progress** via `updateProgress(db, briefingId, { step: "<id>", stepLabel: "<UI text>", details })`. The frontend's status panel polls this. Missing updates means a stuck-looking UI.
+3. **Wrap risky external work** in `safeStep("<id>", async () => { … })`. Errors land in `errors[]` and the pipeline continues. Without this, a transient LLM 500 sinks the whole briefing.
+4. **Record timing** via `recordTiming(timings, "<id>", elapsedMs)`. Even fast steps (< 100 ms) must record — the analytics waterfall breaks otherwise.
+
+## When adding a step
+
+The step ID is the canonical identifier. It appears in:
+
+- `PIPELINE_STEPS` in `briefing-generator.ts` (single source of truth for ordering).
+- `metadata.step` in the briefings DB row.
+- `STEP_LABELS` in `src/frontend/pages/AnalyticsPage.tsx` (waterfall chart labels).
+- The briefing status panel's UI copy.
+- Test assertions on pipeline shape.
+- `src/frontend/help/briefings/how-generation-works.md`.
+
+Use letters for sub-steps (`1a`, `7a`) so we don't have to renumber when inserting.
+
+## Heads-up on file size
+
+`briefing-generator.ts` is still ~1100 lines and `generateDailyBriefing` carries most of the body. The shared helpers (`safeStep`, `withRetry`, `updateProgress`, `checkCancelled`, `CancelledError`, `summarize{FeedSources,WorkContextSources}`, `BriefingResult`) have already moved to [`src/worker/services/briefing-generator/shared.ts`](mdc:src/worker/services/briefing-generator/shared.ts). The per-step bodies still need to migrate — see [`dev-docs/cleanup-roadmap.md`](mdc:dev-docs/cleanup-roadmap.md) item 1 for the suggested layout (`fetch-work-context.ts`, `extract-concepts.ts`, …). If you find yourself adding > 100 lines here, consider whether your work belongs in a new sibling file under `briefing-generator/` rather than piling on.

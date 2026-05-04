@@ -1,0 +1,25 @@
+{
+  // Biome is the canonical formatter + linter for this repo. Pinning
+  // it as the default formatter for every file type Biome handles
+  // ensures format-on-save matches what `bun run lint` (and CI) will
+  // assert. Without this, VS Code / Cursor falls back to its built-in
+  // TypeScript formatter or any other extension a contributor has
+  // installed (Prettier, etc.), which produces different output than
+  // Biome and triggers a "passes locally, fails on CI" loop.
+  //
+  // Install the Biome extension when prompted: see .vscode/extensions.json.
+
+  "editor.defaultFormatter": "biomejs.biome",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "quickfix.biome": "explicit",
+    "source.organizeImports.biome": "explicit"
+  },
+
+  "[typescript]": { "editor.defaultFormatter": "biomejs.biome" },
+  "[typescriptreact]": { "editor.defaultFormatter": "biomejs.biome" },
+  "[javascript]": { "editor.defaultFormatter": "biomejs.biome" },
+  "[javascriptreact]": { "editor.defaultFormatter": "biomejs.biome" },
+  "[json]": { "editor.defaultFormatter": "biomejs.biome" },
+  "[jsonc]": { "editor.defaultFormatter": "biomejs.biome" }
+}

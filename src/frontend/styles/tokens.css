@@ -1,0 +1,316 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-display: "Playfair Display", Georgia, serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", -apple-system, sans-serif;
+  --font-ui: "IBM Plex Sans", "Helvetica Neue", -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", monospace;
+
+  --color-bg: var(--primer-bg);
+  --color-bg-warm: var(--primer-bg-warm);
+  --color-surface: var(--primer-surface);
+  --color-surface-hover: var(--primer-surface-hover);
+  --color-surface-active: var(--primer-surface-active);
+  --color-border: var(--primer-border);
+  --color-border-subtle: var(--primer-border-subtle);
+  --color-text-primary: var(--primer-text-primary);
+  --color-text-secondary: var(--primer-text-secondary);
+  --color-text-dim: var(--primer-text-dim);
+  --color-text-faint: var(--primer-text-faint);
+  --color-accent: var(--primer-accent);
+  --color-accent-dim: var(--primer-accent-dim);
+  --color-accent-muted: var(--primer-accent-muted);
+  --color-positive: var(--primer-positive);
+  --color-positive-dim: var(--primer-positive-dim);
+  --color-warning: var(--primer-warning);
+  --color-warning-dim: var(--primer-warning-dim);
+  --color-negative: var(--primer-negative);
+  --color-negative-dim: var(--primer-negative-dim);
+  --color-link: var(--primer-link);
+  --color-link-hover: var(--primer-link-hover);
+}
+
+/* ── Light theme ── */
+:root {
+  --primer-bg: #f8f8f6;
+  --primer-bg-warm: #f2f1ee;
+  --primer-surface: #ffffff;
+  --primer-surface-hover: #f5f4f2;
+  --primer-surface-active: #eae9e5;
+  --primer-border: #dddbd6;
+  --primer-border-subtle: #e8e7e3;
+  --primer-text-primary: #1c1c1f;
+  --primer-text-secondary: #44443e;
+  --primer-text-dim: #7a7971;
+  --primer-text-faint: #a5a49c;
+  --primer-accent: #9e6e2f;
+  --primer-accent-dim: rgba(158, 110, 47, 0.08);
+  --primer-accent-muted: rgba(158, 110, 47, 0.45);
+  --primer-positive: #3d7241;
+  --primer-positive-dim: rgba(61, 114, 65, 0.08);
+  --primer-warning: #9e7a25;
+  --primer-warning-dim: rgba(158, 122, 37, 0.08);
+  --primer-negative: #a84d38;
+  --primer-negative-dim: rgba(168, 77, 56, 0.08);
+  --primer-link: #2b6298;
+  --primer-link-hover: #1d4e7a;
+}
+
+/* ── Dark theme ── */
+.dark {
+  --primer-bg: #1b1b1f;
+  --primer-bg-warm: #202024;
+  --primer-surface: #27272b;
+  --primer-surface-hover: #303035;
+  --primer-surface-active: #3a3a3f;
+  --primer-border: #404045;
+  --primer-border-subtle: #333338;
+  --primer-text-primary: #ededeb;
+  --primer-text-secondary: #b5b5af;
+  --primer-text-dim: #7d7d77;
+  --primer-text-faint: #55554f;
+  --primer-accent: #d4a45c;
+  --primer-accent-dim: rgba(212, 164, 92, 0.1);
+  --primer-accent-muted: rgba(212, 164, 92, 0.45);
+  --primer-positive: #82b386;
+  --primer-positive-dim: rgba(130, 179, 134, 0.1);
+  --primer-warning: #dbb558;
+  --primer-warning-dim: rgba(219, 181, 88, 0.1);
+  --primer-negative: #d07a64;
+  --primer-negative-dim: rgba(208, 122, 100, 0.1);
+  --primer-link: #7db3da;
+  --primer-link-hover: #a2cce8;
+}
+
+/* ── Code block surfaces ── */
+:root {
+  --primer-code-bg: #f5f4f2;
+  --primer-code-header: #eae9e5;
+  --primer-code-border: #dddbd6;
+  --primer-code-text: #1c1c1f;
+  --primer-code-dim: #7a7971;
+}
+
+.dark {
+  --primer-code-bg: #1e1e2e;
+  --primer-code-header: #181825;
+  --primer-code-border: #313244;
+  --primer-code-text: #cdd6f4;
+  --primer-code-dim: #6c7086;
+}
+
+::selection {
+  background: var(--primer-accent-dim);
+  color: var(--primer-text-primary);
+}
+
+body {
+  font-family: var(--font-body);
+  line-height: 1.75;
+  letter-spacing: -0.005em;
+  background: var(--primer-bg);
+  color: var(--primer-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+
+@utility animate-toast-in {
+  animation: toast-in 0.25s ease-out both;
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@utility animate-slide-in-right {
+  animation: slide-in-right 0.2s ease-out both;
+}
+
+/*
+ * (Removed) `@keyframes audio-marquee` — used to drive a sliding
+ * indeterminate-progress segment in AudioPlayer when TTS duration
+ * was unknown. It looked like a UI bug ("the bar keeps moving on its
+ * own") so we replaced it with a static empty track + a single
+ * pulsing leading-edge dot. The elapsed-time readout to the right of
+ * the bar carries the actual "is something happening" signal; the
+ * bar snaps to deterministic fill once duration arrives.
+ */
+
+.prose-primer {
+  font-family: var(--font-body);
+  color: var(--primer-text-primary);
+  line-height: 1.75;
+  font-size: 1rem;
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    color: var(--primer-text-primary);
+    font-weight: 500;
+    margin-top: 2em;
+    margin-bottom: 0.5em;
+    line-height: 1.3;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+  }
+  h2 {
+    font-size: 1.25rem;
+  }
+  h3 {
+    font-size: 1.1rem;
+  }
+  h4 {
+    font-size: 1rem;
+  }
+
+  p {
+    margin-bottom: 1.15em;
+  }
+
+  a {
+    color: var(--primer-link);
+    text-decoration: none;
+    &:hover {
+      color: var(--primer-link-hover);
+      text-decoration: underline;
+    }
+  }
+
+  strong {
+    font-weight: 600;
+    color: var(--primer-text-primary);
+  }
+
+  em {
+    color: var(--primer-text-secondary);
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+    background: var(--primer-surface-hover);
+    border: 1px solid var(--primer-border-subtle);
+    border-radius: 4px;
+    padding: 0.15em 0.4em;
+  }
+
+  pre {
+    background: var(--primer-code-bg);
+    border: 1px solid var(--primer-code-border);
+    border-radius: 8px;
+    padding: 1em 1.25em;
+    overflow-x: auto;
+    margin: 1.5em 0;
+    color: var(--primer-code-text);
+
+    code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      color: inherit;
+    }
+  }
+
+  ul,
+  ol {
+    padding-left: 1.5em;
+    margin-bottom: 1em;
+  }
+
+  ul {
+    list-style-type: disc;
+  }
+  ol {
+    list-style-type: decimal;
+  }
+
+  li {
+    margin-bottom: 0.4em;
+    &::marker {
+      color: var(--primer-text-dim);
+    }
+  }
+
+  blockquote {
+    border-left: 3px solid var(--primer-accent);
+    padding-left: 1em;
+    margin: 1.5em 0;
+    color: var(--primer-text-secondary);
+    font-style: italic;
+  }
+
+  hr {
+    border: none;
+    border-top: 1px solid var(--primer-border-subtle);
+    margin: 2em 0;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5em 0;
+    font-size: 0.875rem;
+  }
+
+  th {
+    text-align: left;
+    font-weight: 600;
+    padding: 0.5em 0.75em;
+    border-bottom: 2px solid var(--primer-border);
+    color: var(--primer-text-primary);
+  }
+
+  td {
+    padding: 0.5em 0.75em;
+    border-bottom: 1px solid var(--primer-border-subtle);
+    color: var(--primer-text-secondary);
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  img {
+    max-width: 100%;
+    border-radius: 8px;
+  }
+}

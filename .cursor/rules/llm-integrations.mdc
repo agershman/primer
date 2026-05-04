@@ -1,0 +1,30 @@
+---
+description: LLM provider adapters (Anthropic, OpenAI, future Gemini / Mistral / etc.)
+globs: ["src/worker/integrations/llm/**", "src/worker/config/models.ts", "src/worker/config/pricing.ts"]
+alwaysApply: false
+---
+
+# LLM provider integrations
+
+You are touching the LLM integration layer. Before making changes, read [`.cursor/skills/add-llm-adapter/SKILL.md`](mdc:.cursor/skills/add-llm-adapter/SKILL.md) — it documents the canonical pattern: registry registration, `LLMClient` interface, normalized usage, pricing catalog entries, the model-id naming convention.
+
+## Why the pattern matters
+
+The LLM dispatcher (`src/worker/integrations/llm/dispatcher.ts`) is what insulates the rest of the codebase (briefing pipeline, chat responder, continuation classifier) from provider-specific code. Diverging from the registry shape means:
+
+- Models won't appear in the `/api/models` filter.
+- The Settings → AI models picker won't group your provider correctly.
+- The cost ledger (`usage_events` table) won't track your usage in the analytics waterfall.
+- The per-piece "↻ try different model" picker won't surface the new models.
+
+## Required when adding a provider
+
+1. New file `src/worker/integrations/llm/<provider>-adapter.ts` implementing `LLMClient`.
+2. New entry in the `LLM_ADAPTERS` array in `dispatcher.ts` with an `isAvailable(env)` predicate keyed off the provider's API key env var.
+3. New env var declared in `src/worker/types.ts`'s `Env` interface.
+4. New entries in `AVAILABLE_MODELS` in `src/worker/config/models.ts` with full `pricing` info.
+5. Help doc at `src/frontend/help/credentials/<provider>.md` mirroring `anthropic.md` / `openai.md`.
+
+## Tests
+
+Pin the new provider in `tests/unit/multi-provider-ai.test.ts` (registry, isAvailable, /api/models filtering). Mirror `tests/unit/llm-adapter.test.ts` for the per-adapter execution tests.

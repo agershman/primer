@@ -1,0 +1,6 @@
+name = "primer-ui"
+pages_build_output_dir = "dist"
+
+[[services]]
+binding = "PRIMER_API"
+service = "primer-api"

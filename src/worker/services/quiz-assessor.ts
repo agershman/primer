@@ -1,0 +1,178 @@
+import { DEPTH_LABELS } from "../config/constants.js";
+import { DEFAULT_MODELS, lookupCatalogById } from "../config/models.js";
+import { recordTokenUsage } from "../db/queries.js";
+import type { LLMClient, ModelSpec } from "../integrations/llm/types.js";
+
+interface QuizQuestion {
+  question: string;
+  context: string;
+  expectedDepthIndicators: Record<string, string>;
+}
+
+interface GeneratedQuiz extends QuizQuestion {
+  modelUsed: string;
+}
+
+interface GapDetail {
+  summary: string;
+  specifics: string[];
+}
+
+interface LearningPathItem {
+  action: string;
+  rationale: string;
+  resources: Array<{ label: string; url: string }>;
+}
+
+interface AssessmentResult {
+  assessedDepth: number;
+  reasoning: string;
+  gaps: GapDetail;
+  learningPath: LearningPathItem[];
+  modelUsed: string;
+}
+
+export interface QuizGenerationOptions {
+  /** Resolved model spec for this operation. Defaults to the catalog
+   *  entry for `quizGeneration` when omitted. */
+  modelSpec?: ModelSpec;
+  /** "About me" persona — calibrates difficulty + framing for this reader. */
+  aboutStatement?: string | null;
+}
+
+function defaultQuizGenSpec(): ModelSpec {
+  const entry = lookupCatalogById(DEFAULT_MODELS.quizGeneration);
+  return entry
+    ? { provider: entry.provider, model: entry.providerModel }
+    : { provider: "anthropic", model: DEFAULT_MODELS.quizGeneration };
+}
+
+function defaultQuizAssessmentSpec(): ModelSpec {
+  const entry = lookupCatalogById(DEFAULT_MODELS.quizAssessment);
+  return entry
+    ? { provider: entry.provider, model: entry.providerModel }
+    : { provider: "anthropic", model: DEFAULT_MODELS.quizAssessment };
+}
+
+export async function generateQuiz(
+  db: D1Database,
+  userId: string,
+  llm: LLMClient,
+  conceptName: string,
+  depthScore: number,
+  options: QuizGenerationOptions = {},
+): Promise<GeneratedQuiz> {
+  const spec = options.modelSpec ?? defaultQuizGenSpec();
+  const aboutStatement = options.aboutStatement ?? null;
+  const depthLabel = DEPTH_LABELS[Math.floor(depthScore)] ?? "Unknown";
+
+  const aboutBlock = aboutStatement
+    ? `\nABOUT THE READER (calibrate question framing — assume their stated experience level, do not over-explain basics they likely know):\n${aboutStatement.trim()}\n`
+    : "";
+
+  const system = `You generate calibration questions to assess a person's understanding depth.
+${aboutBlock}
+The question should be open-ended and reveal HOW DEEPLY they understand the concept, not just whether they've heard of it.
+
+Current estimated depth: ${depthScore.toFixed(1)} (${depthLabel})
+
+Scale:
+0 = Unknown: never encountered
+1 = Aware: heard of it, can't explain
+2 = Understands: can explain the concept
+3 = Applies: uses it in practice
+4 = Teaches: can teach others, knows edge cases
+5 = Authoritative: deep expertise, shapes direction
+
+Ask a question that could differentiate between adjacent depth levels.
+
+OUTPUT FORMAT (JSON):
+{
+  "question": "The open-ended question",
+  "context": "Brief context about why this question is calibrating",
+  "expectedDepthIndicators": {
+    "1": "What a depth-1 answer looks like",
+    "2": "What a depth-2 answer looks like",
+    "3": "What a depth-3 answer looks like",
+    "4": "What a depth-4 answer looks like",
+    "5": "What a depth-5 answer looks like"
+  }
+}`;
+
+  const { result, usage } = await llm.generateJson<QuizQuestion>({
+    spec,
+    system,
+    user: `Generate a calibration question for the concept: "${conceptName}"`,
+  });
+
+  await recordTokenUsage(db, userId, "quiz_generation", spec, usage);
+
+  return { ...result, modelUsed: spec.model };
+}
+
+export async function assessQuizAnswer(
+  db: D1Database,
+  userId: string,
+  llm: LLMClient,
+  conceptName: string,
+  currentDepth: number,
+  question: string,
+  userAnswer: string,
+  depthIndicators?: string,
+  quizAssessmentSpec?: ModelSpec,
+): Promise<AssessmentResult> {
+  const spec = quizAssessmentSpec ?? defaultQuizAssessmentSpec();
+  const system = `You assess a person's understanding depth based on their answer to a calibration question.
+
+Depth scale:
+0 = Unknown: never encountered
+1 = Aware: heard of it, can't explain
+2 = Understands: can explain the concept
+3 = Applies: uses it in practice, knows tradeoffs
+4 = Teaches: can teach others, knows edge cases
+5 = Authoritative: deep expertise, shapes best practices
+
+Be fair but precise. A vague or surface-level answer should NOT score above 2.
+Practical experience indicators (mentioning specific tools, real incidents, edge cases) push toward 3-4.
+Novel insights or contrarian-but-justified positions push toward 5.
+
+Previous estimated depth: ${currentDepth.toFixed(1)}
+${depthIndicators ? `Expected indicators:\n${depthIndicators}` : ""}
+
+OUTPUT FORMAT (JSON):
+{
+  "assessedDepth": 2.5,
+  "reasoning": "Why this depth was assessed",
+  "gaps": {
+    "summary": "One-line summary of what they're missing",
+    "specifics": ["Specific gap 1", "Specific gap 2"]
+  },
+  "learningPath": [
+    {
+      "action": "What to do next",
+      "rationale": "Why this helps",
+      "resources": [{"label": "Resource name", "url": "https://..."}]
+    }
+  ]
+}`;
+
+  const userMessage = `Concept: "${conceptName}"
+Question: "${question}"
+Their answer: "${userAnswer}"`;
+
+  const { result, usage } = await llm.generateJson<AssessmentResult>({
+    spec,
+    system,
+    user: userMessage,
+  });
+
+  await recordTokenUsage(db, userId, "quiz_assessment", spec, usage);
+
+  return {
+    assessedDepth: Math.min(Math.max(result.assessedDepth ?? 0, 0), 5),
+    reasoning: result.reasoning ?? "",
+    gaps: result.gaps ?? { summary: "", specifics: [] },
+    learningPath: result.learningPath ?? [],
+    modelUsed: spec.model,
+  };
+}

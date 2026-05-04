@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+wrangler.api.toml
+*.local
+.DS_Store
+
+# Project uses bun (bun.lock); npm-generated lockfile is not tracked.
+package-lock.json
+yarn.lock
+pnpm-lock.yaml

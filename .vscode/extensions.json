@@ -1,0 +1,8 @@
+{
+  // Recommended extensions for working in this repo. VS Code / Cursor
+  // shows a notification offering to install these the first time the
+  // workspace is opened.
+  "recommendations": [
+    "biomejs.biome"
+  ]
+}

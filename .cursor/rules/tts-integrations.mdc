@@ -1,0 +1,30 @@
+---
+description: TTS / voice provider adapters (Cloudflare Workers AI, OpenAI, ElevenLabs, future Azure / Polly / PlayHT)
+globs: ["src/worker/integrations/tts/**", "src/worker/services/tts.ts"]
+alwaysApply: false
+---
+
+# TTS provider integrations
+
+You are touching the TTS integration layer. Before making changes, read [`.cursor/skills/add-tts-adapter/SKILL.md`](mdc:.cursor/skills/add-tts-adapter/SKILL.md) — it documents the registry / dispatcher pattern, the `TtsAdapter` interface, the `TTS_MODELS` catalog format, and the per-operation voice-picker integration.
+
+## Why the pattern matters
+
+The TTS dispatcher (`src/worker/integrations/tts/dispatcher.ts`) is what lets the audio routes (`/api/piece/:id/audio`, `/api/deep-dive/:id/audio`, `/api/chat/audio`) stay provider-agnostic. Diverging from the registry shape means:
+
+- Voices won't appear in the `/api/tts-models` filter.
+- The Settings → Voice panel won't group the provider correctly.
+- The cost ledger won't track TTS character usage in the analytics page.
+- The per-piece / deep-dive / chat "↻ try different voice" pickers won't surface the new voices.
+
+## Required when adding a provider
+
+1. New file `src/worker/integrations/tts/<provider>-adapter.ts` implementing `TtsAdapter`.
+2. New branches in `ttsAdapterFor()` and `isProviderConfigured()` in `dispatcher.ts`.
+3. New env var declared in `src/worker/types.ts`'s `Env` interface.
+4. New entries in `TTS_MODELS` in `src/worker/config/constants.ts` (and extend the `TtsProvider` literal type).
+5. Help doc at `src/frontend/help/credentials/<provider>.md` mirroring `elevenlabs.md`.
+
+## Tests
+
+Pin the new adapter in `tests/unit/tts-adapters.test.ts` and `tests/unit/per-op-tts.test.ts`.

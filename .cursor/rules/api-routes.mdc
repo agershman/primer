@@ -1,0 +1,31 @@
+---
+description: Hono API routes in the Cloudflare Worker (request/response, admin gating, long-running work, frontend pairing)
+globs: ["src/worker/routes/**", "src/worker/middleware/**"]
+alwaysApply: false
+---
+
+# API routes
+
+You are touching the API route layer. Before making changes, read [`.cursor/skills/add-route/SKILL.md`](mdc:.cursor/skills/add-route/SKILL.md) — it covers gating, request validation, response shapes, the long-running-work pattern, and the frontend pairing.
+
+## Critical conventions
+
+- **Admin-gated routes** wrap the handler with `requireAdmin` middleware from `src/worker/middleware/require-admin.ts`. Settings affecting deployment-wide configuration (sources, AI model picks, voice defaults, budget caps) are admin-only. Personalization (About, Focus, relevance filter) is per-user.
+
+- **Long-running routes (≥ 10 s)** MUST follow the streaming + `c.executionCtx.waitUntil` pattern. The user navigating away mid-run cannot kill the work. The user-visible source of truth for "is it done" is a notification row (kind `<resource>_<verb>`), not the HTTP response. See [ADR 0005](mdc:dev-docs/adrs/0005-streaming-plus-waituntil.md) and the canonical implementation in `src/worker/routes/briefing.ts`'s `POST /briefing/generate`.
+
+- **Frontend pairing**: every consuming call site uses `apiGet` / `apiPost` / `apiPatch` / `apiDelete` from `src/frontend/utils/api.ts` — never raw `fetch`. CI fails via `tests/unit/api-helper-usage.test.ts` if a new file bypasses.
+
+## File organization
+
+- One resource per file. Don't bolt new endpoints onto unrelated route files.
+- If the resource doesn't exist yet, create `src/worker/routes/<resource>.ts` and register it in `src/worker/index.ts` via `app.route("/api", <resource>Routes)`.
+- Several existing files (`quiz.ts`, `system.ts`, `pieces.ts`, `briefing.ts`) are kitchen-sink files — see [`dev-docs/cleanup-roadmap.md`](mdc:dev-docs/cleanup-roadmap.md) item 2 for the planned splits. Don't pile on; if your endpoint is conceptually distinct, give it its own file.
+
+## Tests
+
+Source-text contract test pinning the route's mount point + gating + response shape, plus an execution test if there's branching logic worth covering. See `tests/unit/notifications.test.ts` for the contract style and `tests/unit/briefing-cancel-route.test.ts` for the execution style.
+
+## Help docs
+
+Update `src/frontend/help/reference/api-endpoints.md` with the new endpoint. If the route introduces a new notification kind, also update `src/frontend/help/reference/notifications.md`.

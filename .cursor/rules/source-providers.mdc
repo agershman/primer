@@ -1,0 +1,33 @@
+---
+description: Source providers — the abstraction through which all external data enters Primer (Linear, Slack, GitHub, incident.io, RSS, HN, ArXiv, …)
+globs: ["src/worker/sources/**", "src/worker/integrations/feeds.ts", "src/worker/integrations/linear.ts", "src/worker/integrations/slack.ts", "src/worker/integrations/github.ts", "src/worker/integrations/incident-io.ts"]
+alwaysApply: false
+---
+
+# Source providers
+
+You are touching the source-provider layer. Before making changes, read [`.cursor/skills/source-providers/SKILL.md`](mdc:.cursor/skills/source-providers/SKILL.md) — it has the full architecture (integration client → SourceProvider → SourceRegistry → settings manifest → optional custom panel) and the multi-instance vs singleton distinction.
+
+## Why the pattern matters
+
+The briefing pipeline iterates over registered providers via `sourceRegistry.getSingletons()` and `sourceRegistry.get(kind)` — it doesn't contain per-source logic. Diverging from the `SourceProvider` interface means the pipeline won't see your source at all, even if the integration HTTP client works.
+
+## Multi-instance vs singleton
+
+- **Singleton** (Linear, Slack, GitHub, incident.io): one instance per deployment, configured via env vars. Per-user filters live in `signalSurfaceMap.<source>`.
+- **Multi-instance** (RSS, HN, ArXiv): N instances per deployment, configured via the `source_instances` table. Each instance has its own `enabled` flag, label, URL, and config.
+
+If you're adding a feed-like source, it's almost certainly multi-instance. Pattern-match against `src/worker/sources/rss.ts`.
+
+## Required when adding a source
+
+1. Integration client in `src/worker/integrations/<source>.ts` (HTTP/SDK wrapper, no Primer-specific logic).
+2. Source provider in `src/worker/sources/<source>.ts` implementing `SourceProvider`.
+3. Registration in `src/worker/sources/index.ts`.
+4. Settings manifest with `nav` (label + keywords for search) and optional `fields`.
+5. If multi-instance, schema entries in `migrations/00NN_…sql` for new config columns (or just use the JSON `config` column).
+6. Help doc at `src/frontend/help/credentials/<source>.md`.
+
+## Tests
+
+Pin the new source in `tests/unit/source-registry.test.ts` and (if applicable) `tests/unit/source-instances.test.ts`.

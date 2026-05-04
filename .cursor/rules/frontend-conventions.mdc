@@ -1,0 +1,60 @@
+---
+description: Frontend conventions — design tokens, API helpers, typed event bus
+globs: ["src/frontend/**/*.tsx", "src/frontend/**/*.ts"]
+alwaysApply: false
+---
+
+# Frontend conventions
+
+You are editing frontend code. Three contract-level rules with CI checks behind them — break any of these silently and CI fails:
+
+## 1. Use design tokens, never raw Tailwind palette
+
+Pinned by [`tests/unit/design-tokens.test.ts`](mdc:tests/unit/design-tokens.test.ts). Token catalog: [`src/frontend/styles/tokens.css`](mdc:src/frontend/styles/tokens.css).
+
+Common mappings:
+
+| ❌ Don't | ✅ Do |
+|---|---|
+| `bg-zinc-900` | `bg-bg-warm` or `bg-surface` |
+| `text-zinc-500` | `text-text-dim` |
+| `text-emerald-*` | `text-positive` |
+| `bg-emerald-*` | `bg-positive` or `bg-positive-dim` |
+| `text-red-*` | `text-negative` |
+| `bg-blue-*` | `bg-accent` or `bg-accent-dim` |
+| `text-blue-*` | `text-accent` or `text-link` |
+
+The only allowed exception is `RichText.tsx`'s per-block code-theme override — it intentionally diverges from the site theme so users can choose dark-on-light code blocks on a light-mode page.
+
+## 2. Use the API helpers, never raw `fetch("/api/...")`
+
+Pinned by [`tests/unit/api-helper-usage.test.ts`](mdc:tests/unit/api-helper-usage.test.ts). Helpers live in [`src/frontend/utils/api.ts`](mdc:src/frontend/utils/api.ts).
+
+```ts
+import { apiGet, apiPost, apiPatch, apiDelete } from "../utils/api";
+
+const data = await apiGet<{ items: Item[] }>("/api/<resource>");
+await apiPost<{ ok: true }>("/api/<resource>", { kind, label });
+await apiPatch(`/api/<resource>/${id}`, { enabled });
+await apiDelete(`/api/<resource>/${id}`);
+```
+
+The helpers attach `X-Client-Timezone` (read by the worker's user-context middleware for "today" resolution) and apply uniform 503 retry semantics. The two allowed exceptions are `utils/api.ts` itself and `useChat.ts` (for SSE streaming, which can't go through `JSON.parse`).
+
+## 3. Wire DOM events through the typed bus
+
+Use [`src/frontend/lib/events.ts`](mdc:src/frontend/lib/events.ts) for new code:
+
+```ts
+import { dispatchPrimerEvent, onPrimerEvent } from "../lib/events";
+
+dispatchPrimerEvent("open-chat");
+useEffect(() => onPrimerEvent("tts-voice-changed", ({ surface, voiceId }) => { … }), []);
+```
+
+The full vocabulary lives in `PrimerEvents` in `events.ts`. Why a custom event bus instead of context: see [ADR 0001](mdc:dev-docs/adrs/0001-custom-event-bus.md). Existing `window.dispatchEvent(new CustomEvent("primer:..."))` calls keep working because the bus emits bit-identical event names.
+
+## Bonus conventions
+
+- **Wrap pages in `<ErrorBoundary name="...">`.** Already done in `App.tsx` — every route is wrapped in a per-page boundary. New pages added to the router need to follow the same pattern.
+- **Settings persistence** uses the debounced save in `useSettings.ts`. New settings fields go through `updateSettings(...)`; the hook handles the 500 ms debounce, the unmount flush, and the `beforeunload` flush.

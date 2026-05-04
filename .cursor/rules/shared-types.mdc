@@ -1,0 +1,42 @@
+---
+description: Shared API contract types + zod schemas between worker and frontend
+globs: ["src/shared/**", "src/frontend/types.ts", "src/worker/types.ts"]
+alwaysApply: false
+---
+
+# Shared API contract types + schemas
+
+You are touching the wire-contract layer. Read [ADR 0004](mdc:dev-docs/adrs/0004-shared-types-module.md) for the rationale before adding or changing types.
+
+## What goes where
+
+| Layer | Location | Purpose |
+|---|---|---|
+| Wire-contract **types** (request/response bodies, SSE payloads, shared discriminated unions) | `src/shared/types.ts` | Compile-time drift protection. Zero runtime imports on either side. |
+| Wire-contract **runtime schemas** (zod) for request bodies | `src/shared/schemas.ts` | Runtime validation at the route boundary via the `parseBody(req, Schema)` helper. The inferred TypeScript type (`z.infer<typeof Schema>`) re-exports for the frontend. |
+| Worker-only types (Hono `Env`, middleware contexts, D1 row shapes) | `src/worker/types.ts` | — |
+| Frontend-only types (component props, hook-internal state) | `src/frontend/types.ts` or co-located | — |
+
+`src/shared/types.ts` MUST have **zero runtime imports** from either side — it's pure type definitions. `src/shared/schemas.ts` may import `zod` (the only runtime dependency in `src/shared/`); both worker and frontend tree-shake unused schemas.
+
+## Adding a new shared type
+
+1. Define it in `src/shared/types.ts` with a comment block explaining where on the wire it appears (which endpoint(s) return it, which consume it).
+2. Re-export it from `src/worker/types.ts` and `src/frontend/types.ts` so existing call sites keep working without a tree-wide import rewrite.
+3. Pin the re-export contract in `tests/unit/content-features.test.ts` (extend the existing pattern for `ContentBlock` / `Resource`).
+
+## Adding runtime validation for a route body
+
+1. Declare the schema in `src/shared/schemas.ts` next to the existing entries (`RefinePromptRequest`, `StatementVersionRequest`, `PrepareBaselineRequest`).
+2. Inside the route handler, swap `await c.req.json<{...}>()` for:
+   ```ts
+   const parsed = await parseBody(c.req.raw, MySchema);
+   if (!parsed.ok) return c.json(parsed.error, 400);
+   const body = parsed.data;
+   ```
+3. The 400 envelope shape (`{ error, issues: [{ path, message }] }`) is fixed across every route — don't hand-roll a different one.
+
+## Don't
+
+- Don't define a new wire-contract type only on one side — that drifts the moment someone adds a literal union member on the other side. Pre-fix this happened twice in production (`Resource.type === "notion"` dropped to `"other"`; `ContentBlock` literal `"code"` shipped frontend-first and silently rendered as `"text"`).
+- Don't import zod from `src/shared/types.ts` — keep types and schemas in their separate files so consumers that only need the type info don't pull zod into their bundle.

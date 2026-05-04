@@ -1,0 +1,15 @@
+{
+  "name": "Primer",
+  "short_name": "Primer",
+  "description": "Daily learning briefings from your work context",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1b1b1f",
+  "theme_color": "#9e6e2f",
+  "orientation": "any",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

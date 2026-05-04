@@ -1,0 +1,68 @@
+name = "primer-api"
+main = "src/worker/index.ts"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Bump foreground CPU budget to the Workers Paid maximum (300s).
+#
+# Note: this does NOT extend `c.executionCtx.waitUntil(...)`'s
+# 30-second post-response cancellation cap (a separate Cloudflare
+# limit). Long-running operations rely on the streaming-response
+# pattern instead — the foreground request stays open while work
+# runs, so this `cpu_ms` cap is what governs them.
+#
+# See dev-docs/adrs/0005-streaming-plus-waituntil.md.
+[limits]
+cpu_ms = 300000
+
+[triggers]
+crons = ["0 5 * * 1-5", "0 3 * * SUN"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "primer-db"
+database_id = "<your-d1-database-id>"
+migrations_dir = "migrations"
+
+[ai]
+binding = "AI"
+
+[vars]
+BUDGET_CAP_MONTHLY = "35"
+RETENTION_DAYS = "365"
+NEAR_MISS_RETENTION_DAYS = "30"
+RELEVANCE_THRESHOLD = "0.4"
+NEAR_MISS_FLOOR = "0.25"
+GITHUB_ORG = "<your-github-org>"
+
+# Auth — see ADR 0006 (dev-docs/adrs/0006-auth-provider-extension-point.md).
+#
+# Production runs in cloudflare-access mode: the worker re-verifies
+# every `Cf-Access-Jwt-Assertion` header against Cloudflare's JWKS
+# (signature + iss + aud + exp). PRIMER_DEV_USER is deliberately
+# absent here — setting it in production wrangler vars would let
+# any request that bypasses Cloudflare Access (e.g. via the
+# *.workers.dev URL) auto-authenticate as that email. For local
+# dev, set PRIMER_AUTH_MODE=dev-header + PRIMER_DEV_USER in
+# `.dev.vars` (gitignored) instead.
+#
+# CF_ACCESS_TEAM_DOMAIN is your team-level Zero Trust subdomain
+# (e.g. <your-team>.cloudflareaccess.com). CF_ACCESS_AUD is the
+# per-application "Application Audience" tag from the Access app.
+#
+# ALLOWED_EMAIL_DOMAINS / ALLOWED_EMAILS gate which authenticated
+# users can reach the deployment, defense-in-depth even if the
+# Access policy is misconfigured. Either match permits.
+PRIMER_AUTH_MODE = "cloudflare-access"
+CF_ACCESS_TEAM_DOMAIN = "<your-team>.cloudflareaccess.com"
+CF_ACCESS_AUD = "<aud-tag-from-access-application>"
+ALLOWED_EMAIL_DOMAINS = "<your-domain.com>"
+# ALLOWED_EMAILS = "alice@example.com,bob@example.com"
+
+# For local development, copy these into `.dev.vars` (gitignored):
+#   PRIMER_AUTH_MODE = "dev-header"
+#   PRIMER_DEV_USER = "<your-email>"
+# Or, if running behind a non-Cloudflare auth proxy, point
+# PRIMER_DEV_HEADER_NAME at whatever email header the proxy sets:
+#   PRIMER_AUTH_MODE = "dev-header"
+#   PRIMER_DEV_HEADER_NAME = "X-Forwarded-Email"
