@@ -35,6 +35,14 @@ import { type AppNotification, useNotifications } from "../hooks/useNotification
 export function NotificationBell() {
   const { notifications, unreadCount, refresh, acknowledge, acknowledgeAll, dismiss } = useNotifications();
   const [open, setOpen] = useState(false);
+  // Snapshot of whether the panel had unread rows when it opened.
+  // The auto-ack effect below races the "Mark all as read" button's
+  // visibility gate — by the time the panel paints we've already
+  // flipped unreadCount to 0, so a naive `unreadCount > 0` check
+  // hides the button immediately. We keep this true for the lifetime
+  // of the open panel so the button stays visible (and serves as the
+  // "fresh after click" affordance described above).
+  const [hadUnreadOnOpen, setHadUnreadOnOpen] = useState(false);
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -49,10 +57,15 @@ export function NotificationBell() {
   // has the panel in front of them, that's by definition no longer
   // true. We still show the rows; we just clear the unread count.
   useEffect(() => {
-    if (open && unreadCount > 0) {
-      void acknowledgeAll();
+    if (open) {
+      if (unreadCount > 0 && !hadUnreadOnOpen) {
+        setHadUnreadOnOpen(true);
+        void acknowledgeAll();
+      }
+    } else if (hadUnreadOnOpen) {
+      setHadUnreadOnOpen(false);
     }
-  }, [open, unreadCount, acknowledgeAll]);
+  }, [open, unreadCount, hadUnreadOnOpen, acknowledgeAll]);
 
   // Refresh the list once on open so a freshly-completed notification
   // shows up even if it landed between polls.
@@ -145,7 +158,7 @@ export function NotificationBell() {
                * a clear visual signal that the panel is "fresh"
                * after a click.
                */}
-              {unreadCount > 0 && (
+              {(unreadCount > 0 || hadUnreadOnOpen) && (
                 <button
                   type="button"
                   onClick={() => {
