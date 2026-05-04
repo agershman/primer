@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChannelPicker } from "../../ChannelPicker";
 import { useSettingsCtx } from "../SettingsContext";
-import { Card, Field, PanelHeader, SelectedSummary, ToggleRow } from "../shared";
+import { Card, Field, PanelHeader, SelectedSummary, SourceEnabledRow, ToggleRow, useSourceEnabled } from "../shared";
 import { InScopePreview, ScopeRow } from "./InScopePreview";
 
 const HISTORY_OPTIONS = [
@@ -37,6 +37,7 @@ export function SlackPanel() {
   // Hooks live above the early return (rules of hooks: hook order
   // must be identical on every render).
   const [editingChannels, setEditingChannels] = useState(false);
+  const { enabled, setEnabled } = useSourceEnabled("slack");
   if (!data) return null;
 
   const slackDefaults = {
@@ -59,93 +60,107 @@ export function SlackPanel() {
     <div>
       <PanelHeader title="Slack" description="Channels Primer reads for work context." />
 
-      <Field label="Channels" hint="Which Slack channels to read messages from.">
-        {editingChannels ? (
-          <div>
-            <ChannelPicker
-              channels={slackChannels}
-              selected={slack.channels}
-              onChange={(ids, names) => updateSlack({ channels: ids, channelNames: names })}
-            />
-            <div className="flex justify-end mt-2">
-              <button
-                type="button"
-                onClick={() => setEditingChannels(false)}
-                className="px-2.5 py-1 rounded-md border border-border text-xs font-mono text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+      <SourceEnabledRow
+        enabled={enabled}
+        onChange={setEnabled}
+        hint="Off by default. Turn on to fan Slack threads into your daily briefing — the channel list below decides which ones."
+      />
+
+      {!enabled ? (
+        <div className="text-[11px] font-mono text-text-dim italic">
+          Slack is off for your briefings. Toggle it on to pick channels and the history window.
+        </div>
+      ) : (
+        <>
+          <Field label="Channels" hint="Which Slack channels to read messages from.">
+            {editingChannels ? (
+              <div>
+                <ChannelPicker
+                  channels={slackChannels}
+                  selected={slack.channels}
+                  onChange={(ids, names) => updateSlack({ channels: ids, channelNames: names })}
+                />
+                <div className="flex justify-end mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingChannels(false)}
+                    className="px-2.5 py-1 rounded-md border border-border text-xs font-mono text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <SelectedSummary
+                items={[...slack.channelNames].sort().map((n) => `#${n}`)}
+                onEdit={() => setEditingChannels(true)}
+                emptyLabel="No channels selected"
+              />
+            )}
+          </Field>
+
+          <Field label="History window" hint="How far back to look in channel history.">
+            <Card>
+              <select
+                value={slack.historyDays}
+                onChange={(e) => updateSlack({ historyDays: Number(e.target.value) })}
+                className="w-full bg-surface border border-border rounded-md px-3 py-1.5 text-xs font-mono text-text-primary outline-none focus:border-accent transition-colors"
               >
-                Done
-              </button>
-            </div>
-          </div>
-        ) : (
-          <SelectedSummary
-            items={[...slack.channelNames].sort().map((n) => `#${n}`)}
-            onEdit={() => setEditingChannels(true)}
-            emptyLabel="No channels selected"
-          />
-        )}
-      </Field>
+                {HISTORY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </Card>
+          </Field>
 
-      <Field label="History window" hint="How far back to look in channel history.">
-        <Card>
-          <select
-            value={slack.historyDays}
-            onChange={(e) => updateSlack({ historyDays: Number(e.target.value) })}
-            className="w-full bg-surface border border-border rounded-md px-3 py-1.5 text-xs font-mono text-text-primary outline-none focus:border-accent transition-colors"
-          >
-            {HISTORY_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </Card>
-      </Field>
-
-      <Field
-        label="Bookmarked messages"
-        hint={
-          // Match Slack's actual UX language: in Slack, bookmarking
-          // is the colloquial verb for the :bookmark: reaction. Show
-          // the rendered emoji alongside the literal shortcode so the
-          // user sees both what it looks like and what to type.
-          <>
-            Pull in any message in your monitored channels reacted with <BookmarkReactionTag /> — even if it would
-            otherwise be filtered as too short or too quiet. Bookmarked messages bypass the noise / brevity filters and
-            sort to the top of the work-context bar.
-          </>
-        }
-      >
-        <Card>
-          <ToggleRow
-            label={
+          <Field
+            label="Bookmarked messages"
+            hint={
+              // Match Slack's actual UX language: in Slack, bookmarking
+              // is the colloquial verb for the :bookmark: reaction. Show
+              // the rendered emoji alongside the literal shortcode so the
+              // user sees both what it looks like and what to type.
               <>
-                Include <BookmarkReactionTag /> reactions
+                Pull in any message in your monitored channels reacted with <BookmarkReactionTag /> — even if it would
+                otherwise be filtered as too short or too quiet. Bookmarked messages bypass the noise / brevity filters
+                and sort to the top of the work-context bar.
               </>
             }
-            checked={!!slack.includeBookmarked}
-            onChange={(v) => updateSlack({ includeBookmarked: v })}
-            last
-          />
-        </Card>
-      </Field>
-
-      <InScopePreview
-        source={previewState.slack}
-        count={countLabel}
-        renderList={(d) => (
-          <>
-            {d.channels.map((ch) => (
-              <ScopeRow
-                key={ch.id}
-                ref={`#${ch.name}`}
-                title={<span className="text-text-secondary">Channel</span>}
-                meta={<span>id: {ch.id}</span>}
+          >
+            <Card>
+              <ToggleRow
+                label={
+                  <>
+                    Include <BookmarkReactionTag /> reactions
+                  </>
+                }
+                checked={!!slack.includeBookmarked}
+                onChange={(v) => updateSlack({ includeBookmarked: v })}
+                last
               />
-            ))}
-          </>
-        )}
-      />
+            </Card>
+          </Field>
+
+          <InScopePreview
+            source={previewState.slack}
+            count={countLabel}
+            renderList={(d) => (
+              <>
+                {d.channels.map((ch) => (
+                  <ScopeRow
+                    key={ch.id}
+                    ref={`#${ch.name}`}
+                    title={<span className="text-text-secondary">Channel</span>}
+                    meta={<span>id: {ch.id}</span>}
+                  />
+                ))}
+              </>
+            )}
+          />
+        </>
+      )}
     </div>
   );
 }

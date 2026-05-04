@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../../utils/api";
 import { ConfirmDialog } from "../../ConfirmDialog";
-import { Card, Field, PanelHeader } from "../shared";
+import { Card, Field, PanelHeader, SourceEnabledRow, useSourceEnabled } from "../shared";
 
 /**
  * Deployment-level feed manager (formerly per-user "ecosystem" panel).
@@ -42,6 +42,11 @@ interface Suggestion {
 }
 
 export function FeedsPanel() {
+  const rssToggle = useSourceEnabled("rss");
+  const hnToggle = useSourceEnabled("hn");
+  const arxivToggle = useSourceEnabled("arxiv");
+  const anyKindEnabled = rssToggle.enabled || hnToggle.enabled || arxivToggle.enabled;
+
   const [sources, setSources] = useState<SourceInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -165,172 +170,209 @@ export function FeedsPanel() {
       />
 
       <Field
-        label="Suggest sources from your persona"
-        hint="Claude reads your About + Focus and proposes well-known feeds it thinks match. One click to add."
+        label="Include in my briefings"
+        hint="Each kind is independently togglable. Off by default — turn on to start fanning these into your daily briefing."
       >
-        <Card>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={fetchSuggestions}
-              disabled={suggesting}
-              className="px-3 py-1.5 rounded-md bg-accent text-white border border-accent text-xs font-mono font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-            >
-              {suggesting ? "Thinking…" : "✨ Suggest sources"}
-            </button>
-            <span className="text-[11px] font-mono text-text-dim">Won't duplicate anything already configured.</span>
-          </div>
-          {suggestErr && <div className="mt-2 text-[11px] font-mono text-negative">{suggestErr}</div>}
-          {suggestions && suggestions.length === 0 && !suggesting && (
-            <div className="mt-2 text-[11px] font-mono text-text-dim italic">
-              No suggestions right now — try adjusting your About / Focus statement and asking again.
-            </div>
-          )}
-          {suggestions && suggestions.length > 0 && (
-            <ul className="mt-3 space-y-2">
-              {suggestions.map((sg) => (
-                <li key={sg.url} className="rounded-md border border-border-subtle bg-bg p-2.5 flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-mono text-text-primary truncate">{sg.label}</span>
-                      <span className="text-[10px] font-mono text-text-dim uppercase tracking-wider">
-                        {sg.contentType}
-                      </span>
-                    </div>
-                    {sg.rationale && (
-                      <div className="text-[11px] font-mono text-text-dim mt-0.5 leading-snug">{sg.rationale}</div>
-                    )}
-                    <a
-                      href={sg.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[10px] font-mono text-accent hover:underline truncate block mt-0.5"
+        <SourceEnabledRow
+          enabled={rssToggle.enabled}
+          onChange={rssToggle.setEnabled}
+          label="RSS / Atom feeds"
+          hint="Vendor blogs, conference proceedings, newsletters, anything with a feed URL."
+        />
+        <SourceEnabledRow
+          enabled={hnToggle.enabled}
+          onChange={hnToggle.setEnabled}
+          label="Hacker News"
+          hint="HN front page and topic-tagged feeds."
+        />
+        <SourceEnabledRow
+          enabled={arxivToggle.enabled}
+          onChange={arxivToggle.setEnabled}
+          label="ArXiv papers"
+          hint="Subject-area paper feeds — useful for ML / systems research."
+        />
+      </Field>
+
+      {!anyKindEnabled ? (
+        <div className="text-[11px] font-mono text-text-dim italic">
+          All feed kinds are off for your briefings. Toggle one on above to manage the deployment's configured feeds.
+        </div>
+      ) : (
+        <>
+          <Field
+            label="Suggest sources from your persona"
+            hint="Claude reads your About + Focus and proposes well-known feeds it thinks match. One click to add."
+          >
+            <Card>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={fetchSuggestions}
+                  disabled={suggesting}
+                  className="px-3 py-1.5 rounded-md bg-accent text-white border border-accent text-xs font-mono font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  {suggesting ? "Thinking…" : "✨ Suggest sources"}
+                </button>
+                <span className="text-[11px] font-mono text-text-dim">
+                  Won't duplicate anything already configured.
+                </span>
+              </div>
+              {suggestErr && <div className="mt-2 text-[11px] font-mono text-negative">{suggestErr}</div>}
+              {suggestions && suggestions.length === 0 && !suggesting && (
+                <div className="mt-2 text-[11px] font-mono text-text-dim italic">
+                  No suggestions right now — try adjusting your About / Focus statement and asking again.
+                </div>
+              )}
+              {suggestions && suggestions.length > 0 && (
+                <ul className="mt-3 space-y-2">
+                  {suggestions.map((sg) => (
+                    <li
+                      key={sg.url}
+                      className="rounded-md border border-border-subtle bg-bg p-2.5 flex items-start gap-2"
                     >
-                      {sg.url}
-                    </a>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => acceptSuggestion(sg)}
-                    className="shrink-0 px-2.5 py-1 rounded-md bg-accent text-white text-[11px] font-mono font-medium hover:opacity-90 transition-opacity"
-                  >
-                    Add
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </Field>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-mono text-text-primary truncate">{sg.label}</span>
+                          <span className="text-[10px] font-mono text-text-dim uppercase tracking-wider">
+                            {sg.contentType}
+                          </span>
+                        </div>
+                        {sg.rationale && (
+                          <div className="text-[11px] font-mono text-text-dim mt-0.5 leading-snug">{sg.rationale}</div>
+                        )}
+                        <a
+                          href={sg.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] font-mono text-accent hover:underline truncate block mt-0.5"
+                        >
+                          {sg.url}
+                        </a>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => acceptSuggestion(sg)}
+                        className="shrink-0 px-2.5 py-1 rounded-md bg-accent text-white text-[11px] font-mono font-medium hover:opacity-90 transition-opacity"
+                      >
+                        Add
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </Field>
 
-      <Field
-        label="Add a source by feed URL"
-        hint="RSS 2.0 and Atom 1.0 are both supported. Most blogs publish a feed at /feed, /rss, /feed.xml, or /atom.xml."
-      >
-        <Card>
-          <form onSubmit={submitAdd} className="space-y-2">
-            <input
-              type="text"
-              value={addLabel}
-              onChange={(e) => setAddLabel(e.target.value)}
-              placeholder="Display name (e.g. SRE Weekly)"
-              className="w-full bg-surface border border-border rounded-md px-2.5 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-faint outline-none focus:border-accent transition-colors"
-              maxLength={120}
-              disabled={adding}
-            />
-            <input
-              type="url"
-              value={addUrl}
-              onChange={(e) => setAddUrl(e.target.value)}
-              placeholder="https://example.com/feed"
-              className="w-full bg-surface border border-border rounded-md px-2.5 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-faint outline-none focus:border-accent transition-colors"
-              maxLength={500}
-              disabled={adding}
-            />
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={adding || !addLabel.trim() || !addUrl.trim()}
-                className="px-3 py-1 rounded-md bg-accent text-white text-[11px] font-mono font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-              >
-                {adding ? "Adding…" : "Add source"}
-              </button>
-            </div>
-          </form>
-        </Card>
-      </Field>
-
-      <Field
-        label="Configured feeds"
-        hint={`${sources.filter((s) => s.enabled).length} active · ${sources.filter((s) => !s.enabled).length} disabled`}
-      >
-        {loading && <div className="text-[11px] font-mono text-text-dim italic">Loading…</div>}
-        {error && <div className="text-[11px] font-mono text-negative mb-2">{error}</div>}
-        {!loading && sources.length === 0 && (
-          <div className="text-[11px] font-mono text-text-dim italic">
-            No sources yet. Use ✨ Suggest above or add one by URL.
-          </div>
-        )}
-        {sources.length > 0 && (
-          <ul className="space-y-1.5">
-            {sources.map((s) => (
-              <li
-                key={s.id}
-                className={`rounded-md border px-3 py-2 ${
-                  s.enabled ? "border-border-subtle bg-surface" : "border-border-subtle bg-bg-warm/40 opacity-60"
-                }`}
-              >
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="shrink-0 inline-flex items-center rounded-md bg-bg-warm px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-text-dim border border-border-subtle">
-                    {s.kind}
-                  </span>
-                  <span className="flex-1 min-w-0 text-xs font-mono text-text-primary truncate">{s.label}</span>
+          <Field
+            label="Add a source by feed URL"
+            hint="RSS 2.0 and Atom 1.0 are both supported. Most blogs publish a feed at /feed, /rss, /feed.xml, or /atom.xml."
+          >
+            <Card>
+              <form onSubmit={submitAdd} className="space-y-2">
+                <input
+                  type="text"
+                  value={addLabel}
+                  onChange={(e) => setAddLabel(e.target.value)}
+                  placeholder="Display name (e.g. SRE Weekly)"
+                  className="w-full bg-surface border border-border rounded-md px-2.5 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-faint outline-none focus:border-accent transition-colors"
+                  maxLength={120}
+                  disabled={adding}
+                />
+                <input
+                  type="url"
+                  value={addUrl}
+                  onChange={(e) => setAddUrl(e.target.value)}
+                  placeholder="https://example.com/feed"
+                  className="w-full bg-surface border border-border rounded-md px-2.5 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-faint outline-none focus:border-accent transition-colors"
+                  maxLength={500}
+                  disabled={adding}
+                />
+                <div className="flex justify-end">
                   <button
-                    type="button"
-                    onClick={() => toggle(s)}
-                    className="shrink-0 px-2 py-0.5 rounded-md border border-border text-[10px] font-mono text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+                    type="submit"
+                    disabled={adding || !addLabel.trim() || !addUrl.trim()}
+                    className="px-3 py-1 rounded-md bg-accent text-white text-[11px] font-mono font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
                   >
-                    {s.enabled ? "Disable" : "Enable"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPendingRemoval(s)}
-                    aria-label={`Remove ${s.label}`}
-                    className="shrink-0 px-2 py-0.5 rounded-md border border-border text-[10px] font-mono text-text-dim hover:text-negative hover:border-negative/30 transition-colors"
-                  >
-                    Remove
+                    {adding ? "Adding…" : "Add source"}
                   </button>
                 </div>
-                {s.url && (
-                  <div className="mt-1 text-[10px] font-mono text-text-dim">
-                    <a
-                      href={s.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-text-dim hover:text-accent truncate"
-                    >
-                      {s.url}
-                    </a>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Field>
+              </form>
+            </Card>
+          </Field>
 
-      <ConfirmDialog
-        open={pendingRemoval !== null}
-        title={pendingRemoval ? `Remove "${pendingRemoval.label}"?` : ""}
-        description="Future briefings will stop scanning this feed. You can re-add it any time from the panel above — Primer doesn't keep deleted history."
-        confirmLabel="Remove"
-        destructive
-        busy={removing}
-        onConfirm={confirmRemoval}
-        onCancel={() => {
-          if (!removing) setPendingRemoval(null);
-        }}
-      />
+          <Field
+            label="Configured feeds"
+            hint={`${sources.filter((s) => s.enabled).length} active · ${sources.filter((s) => !s.enabled).length} disabled`}
+          >
+            {loading && <div className="text-[11px] font-mono text-text-dim italic">Loading…</div>}
+            {error && <div className="text-[11px] font-mono text-negative mb-2">{error}</div>}
+            {!loading && sources.length === 0 && (
+              <div className="text-[11px] font-mono text-text-dim italic">
+                No sources yet. Use ✨ Suggest above or add one by URL.
+              </div>
+            )}
+            {sources.length > 0 && (
+              <ul className="space-y-1.5">
+                {sources.map((s) => (
+                  <li
+                    key={s.id}
+                    className={`rounded-md border px-3 py-2 ${
+                      s.enabled ? "border-border-subtle bg-surface" : "border-border-subtle bg-bg-warm/40 opacity-60"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="shrink-0 inline-flex items-center rounded-md bg-bg-warm px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-text-dim border border-border-subtle">
+                        {s.kind}
+                      </span>
+                      <span className="flex-1 min-w-0 text-xs font-mono text-text-primary truncate">{s.label}</span>
+                      <button
+                        type="button"
+                        onClick={() => toggle(s)}
+                        className="shrink-0 px-2 py-0.5 rounded-md border border-border text-[10px] font-mono text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+                      >
+                        {s.enabled ? "Disable" : "Enable"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingRemoval(s)}
+                        aria-label={`Remove ${s.label}`}
+                        className="shrink-0 px-2 py-0.5 rounded-md border border-border text-[10px] font-mono text-text-dim hover:text-negative hover:border-negative/30 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    {s.url && (
+                      <div className="mt-1 text-[10px] font-mono text-text-dim">
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-text-dim hover:text-accent truncate"
+                        >
+                          {s.url}
+                        </a>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Field>
+
+          <ConfirmDialog
+            open={pendingRemoval !== null}
+            title={pendingRemoval ? `Remove "${pendingRemoval.label}"?` : ""}
+            description="Future briefings will stop scanning this feed. You can re-add it any time from the panel above — Primer doesn't keep deleted history."
+            confirmLabel="Remove"
+            destructive
+            busy={removing}
+            onConfirm={confirmRemoval}
+            onCancel={() => {
+              if (!removing) setPendingRemoval(null);
+            }}
+          />
+        </>
+      )}
     </div>
   );
 }
