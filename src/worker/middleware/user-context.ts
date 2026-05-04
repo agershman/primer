@@ -1,5 +1,6 @@
 import { createMiddleware } from "hono/factory";
 import { nanoid } from "nanoid";
+import { isSourceId, type SourceId } from "../../shared/sources.js";
 import { DEFAULT_SIGNAL_SURFACE_MAP } from "../config/signal-surfaces.js";
 import type { Env, UserContext, UserSettings } from "../types.js";
 import { resolveRequestTimezone } from "../util/time.js";
@@ -135,11 +136,18 @@ export const userContext = createMiddleware<{
     /* ignore malformed JSON */
   }
 
-  let enabledSourceIds: string[] = [];
+  let enabledSourceIds: SourceId[] = [];
   try {
     if (settingsRow?.enabled_source_ids) {
       const parsed = JSON.parse(settingsRow.enabled_source_ids);
-      if (Array.isArray(parsed)) enabledSourceIds = parsed.filter((v): v is string => typeof v === "string");
+      if (Array.isArray(parsed)) {
+        // Defensive narrowing at the trust boundary — the JSON
+        // column can in principle hold any string (older deploys,
+        // bad PATCH input that pre-dated validation, etc.). Drop
+        // anything that isn't a known `SourceId` so downstream code
+        // can rely on the literal union.
+        enabledSourceIds = parsed.filter((v): v is SourceId => typeof v === "string" && isSourceId(v));
+      }
     }
   } catch {
     /* ignore malformed JSON — empty list means nothing fans out */

@@ -41,12 +41,15 @@ describe("PATCH /api/settings exposes enabledSourceIds as user-level", () => {
     expect(src).toMatch(/enabled_source_ids = \?/);
   });
 
-  it("filters unknown source IDs against the registry rather than rejecting them", async () => {
+  it("filters unknown source IDs against the canonical SourceId set rather than rejecting them", async () => {
     const src = await read("src/worker/routes/settings.ts");
     // A typo or a removed provider must not brick the PATCH — drop
     // unknown IDs silently so settings keep persisting cleanly.
-    expect(src).toMatch(/sourceRegistry\.getAll\(\)/);
-    expect(src).toMatch(/knownIds\.has/);
+    // Validation is now against the canonical literal union from
+    // `shared/sources.ts` (single source of truth) rather than a
+    // runtime registry lookup.
+    expect(src).toMatch(/from "\.\.\/\.\.\/shared\/sources/);
+    expect(src).toMatch(/isSourceId\(id\)/);
   });
 
   it("keeps enabledSourceIds OUT of the admin-only fields gate", async () => {
@@ -66,9 +69,12 @@ describe("UserContext loads enabled_source_ids from user_settings", () => {
     expect(src).toContain("enabledSourceIds");
   });
 
-  it("UserSettings type carries enabledSourceIds", async () => {
+  it("UserSettings type carries enabledSourceIds typed as the canonical SourceId union", async () => {
     const src = await read("src/worker/types.ts");
-    expect(src).toMatch(/enabledSourceIds\?:\s*string\[\]/);
+    // SourceId[] (literal union from shared/sources.ts) catches typo'd
+    // ids at compile time — `string[]` is too loose and was the shape
+    // that let the 0004 → 0005 incident_io regression slip through.
+    expect(src).toMatch(/enabledSourceIds\?:\s*SourceId\[\]/);
   });
 });
 
@@ -76,7 +82,12 @@ describe("Briefing pipeline gates on enabled source IDs", () => {
   it("singleton fan-out filters providers against the user's enabled list", async () => {
     const src = await read("src/worker/services/briefing-generator.ts");
     expect(src).toMatch(/userSettings\?\.enabledSourceIds/);
-    expect(src).toMatch(/sourceRegistry[\s\S]{0,80}getSingletons\(env\)[\s\S]{0,200}\.filter/);
+    // Gate is now delegated to `selectEnabledSingletons`
+    // (briefing-generator/shared.ts) so the pure function is
+    // pinnable by a unit test without standing up the rest of
+    // the pipeline. See tests/unit/briefing-pipeline-gate.test.ts
+    // for the behavioural assertions.
+    expect(src).toMatch(/selectEnabledSingletons\(\s*sourceRegistry\.getSingletons\(env\)/);
   });
 
   it("adjacent-scanner accepts an enabledSourceIds option and filters by instance kind", async () => {
@@ -161,35 +172,69 @@ describe("Frontend FirstRunSetup.tsx — onboarding sources step", () => {
   });
 });
 
-describe("Frontend SourcesOverviewPanel — per-user toggle list", () => {
-  it("renders one row per source with a toggle bound to enabledSourceIds", async () => {
-    const src = await read("src/frontend/components/settings/panels/SourcesOverviewPanel.tsx");
-    expect(src).toContain("/api/sources");
-    expect(src).toMatch(/updateSettings\(\{\s*enabledSourceIds:/);
-    expect(src).toMatch(/data\?\.enabledSourceIds/);
-  });
+describe("Per-source panels carry the enabled toggle inline", () => {
+  // The standalone SourcesOverviewPanel was removed because a
+  // dedicated "Sources" menu item felt redundant once a user has
+  // already done onboarding — the toggle belongs in each respective
+  // source panel, with the rest of the per-source filters hidden
+  // when the source is off.
+  for (const [file, sourceId] of [
+    ["src/frontend/components/settings/panels/LinearPanel.tsx", "linear"],
+    ["src/frontend/components/settings/panels/SlackPanel.tsx", "slack"],
+    ["src/frontend/components/settings/panels/GitHubPanel.tsx", "github"],
+    ["src/frontend/components/settings/panels/IncidentIoPanel.tsx", "incident_io"],
+  ] as const) {
+    it(`${file.split("/").pop()} renders the SourceEnabledRow for "${sourceId}" and hides the body when off`, async () => {
+      const src = await read(file);
+      expect(src).toMatch(new RegExp(`useSourceEnabled\\("${sourceId}"\\)`));
+      expect(src).toContain("SourceEnabledRow");
+      // Conditional rendering on the toggle: when off, only the
+      // toggle is visible and the rest of the panel is collapsed.
+      expect(src).toMatch(/!enabled\s*\?/);
+    });
+  }
 
-  it("disables the toggle for sources the deployment hasn't configured", async () => {
-    const src = await read("src/frontend/components/settings/panels/SourcesOverviewPanel.tsx");
-    // Unavailable sources (missing required env) render with a
-    // disabled checkbox + helper text so the user knows why they
-    // can't flip them on.
-    expect(src).toMatch(/disabled=\{disabled\}/);
-    expect(src).toMatch(/needs configuration/);
+  it("FeedsPanel exposes per-kind toggles for rss, hn, and arxiv", async () => {
+    const src = await read("src/frontend/components/settings/panels/FeedsPanel.tsx");
+    expect(src).toMatch(/useSourceEnabled\("rss"\)/);
+    expect(src).toMatch(/useSourceEnabled\("hn"\)/);
+    expect(src).toMatch(/useSourceEnabled\("arxiv"\)/);
+    // When all three kinds are off, the deployment-management UI
+    // (Add by URL, Suggest, configured-feeds list) is hidden.
+    expect(src).toMatch(/anyKindEnabled/);
   });
 });
 
-describe("Frontend SettingsModal — sources nav entry", () => {
-  it("registers a 'sources' nav entry at the top of the Sources group", async () => {
+describe("Frontend SettingsModal — standalone Sources panel removed", () => {
+  it("no longer registers a top-level 'sources' nav entry", async () => {
     const src = await read("src/frontend/components/settings/SettingsModal.tsx");
-    expect(src).toMatch(/id:\s*"sources"[\s\S]{0,200}group:\s*"Sources"[\s\S]{0,200}SourcesOverviewPanel/);
+    expect(src).not.toMatch(/SourcesOverviewPanel/);
+    // The 'sources' id is gone from STATIC_NAV — toggles live inline
+    // on each per-source panel now.
+    expect(src).not.toMatch(/id:\s*"sources",/);
   });
 
-  it("includes 'sources' in the regular-user-allowed panel set", async () => {
+  it("non-admin users can reach each per-source panel + Feeds to flip their own toggle", async () => {
     const src = await read("src/frontend/components/settings/SettingsModal.tsx");
-    // The new SourcesOverviewPanel is per-user, so non-admins must
-    // be allowed to reach it. Without this they couldn't toggle
-    // their own opt-in list.
-    expect(src).toMatch(/REGULAR_USER_PANEL_IDS = new Set\(\[[^\]]*"sources"/);
+    // Without these IDs in the regular-user allowlist, a non-admin
+    // would have no way to toggle their own enabled sources after
+    // onboarding.
+    const m = src.match(/REGULAR_USER_PANEL_IDS\s*=\s*new Set\(\[([\s\S]*?)\]\)/);
+    expect(m).toBeTruthy();
+    for (const id of ["linear", "slack", "github", "incident_io", "feeds"]) {
+      expect(m![1]).toMatch(new RegExp(`"${id}"`));
+    }
+  });
+});
+
+describe("Migration 0005 fixes the incident_io ID typo from 0004", () => {
+  it("rewrites the bogus 'incident-io' (hyphen) token back to 'incident_io' (underscore)", async () => {
+    const sql = await read("migrations/0005_fix_incident_io_kind.sql");
+    // The previous migration backfilled the wrong kind. Without
+    // this fix every backfilled user silently lost incident.io
+    // fan-out because the briefing pipeline filters by exact match
+    // against `provider.id` (which is "incident_io", underscore).
+    expect(sql).toMatch(/REPLACE\(enabled_source_ids,\s*'"incident-io"',\s*'"incident_io"'\)/);
+    expect(sql).toMatch(/WHERE enabled_source_ids LIKE '%"incident-io"%'/);
   });
 });

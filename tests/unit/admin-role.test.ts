@@ -164,7 +164,7 @@ describe("Users panel — Settings UI wiring", () => {
     // Ordering pin: the regular-user whitelist must NOT include
     // "users" — adding it accidentally would expose the admin
     // surface to non-admins (server still 403s, but it's a UX bug).
-    const regularSet = src.match(/REGULAR_USER_PANEL_IDS\s*=\s*new Set\(\[(.*?)\]\)/);
+    const regularSet = src.match(/REGULAR_USER_PANEL_IDS\s*=\s*new Set\(\[([\s\S]*?)\]\)/);
     expect(regularSet).toBeTruthy();
     expect(regularSet![1]).not.toMatch(/"users"/);
   });
@@ -304,11 +304,17 @@ describe("requireAdmin middleware helper", () => {
 });
 
 describe("Frontend nav + per-piece UI gates", () => {
-  it("SettingsModal filters its nav for non-admins to Personalization + Account only", async () => {
+  it("SettingsModal filters its nav for non-admins to Personalization + per-source toggles + Account", async () => {
     const src = await read("src/frontend/components/settings/SettingsModal.tsx");
     expect(src).toMatch(/REGULAR_USER_PANEL_IDS/);
-    // Personalization (about / focus / filter) + the user's own Account row.
-    expect(src).toMatch(/"about"[\s\S]{0,80}"focus"[\s\S]{0,80}"filter"[\s\S]{0,80}"account"/);
+    // Personalization (about / focus / filter) → per-source panels
+    // (so non-admins can flip their own enabledSourceIds toggle on
+    // each one) → the user's own Account row. The deployment-wide
+    // config inside each source panel is still admin-gated server
+    // side; non-admins only get to see the toggle.
+    expect(src).toMatch(
+      /"about"[\s\S]{0,400}"focus"[\s\S]{0,400}"filter"[\s\S]{0,400}"linear"[\s\S]{0,400}"feeds"[\s\S]{0,400}"account"/,
+    );
     // Returns the unfiltered list when admin, filters down otherwise.
     expect(src).toMatch(/if \(isAdmin\) return all/);
     expect(src).toMatch(/all\.filter\(\(entry\) => REGULAR_USER_PANEL_IDS\.has/);

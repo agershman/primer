@@ -1,0 +1,52 @@
+# Test-only wrangler config for `@cloudflare/vitest-pool-workers`.
+#
+# This file isn't a deployable target — it never gets passed to
+# `wrangler deploy`. It exists so the workers test pool (run by
+# `vitest --project workers`) can spin up workerd locally with the
+# bindings the worker code expects, without depending on operator-
+# specific values in `wrangler.api.toml` (which is gitignored).
+#
+# Bindings defined here:
+#
+#   • DB — D1 database backed by an in-memory miniflare-managed
+#     SQLite. The pool runs every migration in `migrations/` against
+#     it before any test executes (`migrations_dir = "migrations"`).
+#     Tests that PATCH /settings, generate briefings, etc. see real
+#     D1 prepared-statement semantics — not the SQLite-via-better-
+#     sqlite3 fake that lives under `tests/helpers/d1-fake.ts`.
+#
+#   • AI — left out intentionally. The tests don't need a real AI
+#     binding because the routes we exercise here gate on key
+#     presence (ANTHROPIC_API_KEY / OPENAI_API_KEY); when both are
+#     empty they short-circuit before touching `env.AI`.
+#
+# Vars use safe defaults so any code path that reads `c.env.*`
+# resolves a string and doesn't `undefined`-crash the test.
+name = "primer-test"
+main = "src/worker/index.ts"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "primer-test-db"
+# Migration runner is wired through the pool's `miniflare.bindings`
+# in vitest.config.ts. Naming the dir here keeps wrangler's CLI
+# happy if anyone runs `wrangler d1 migrations apply` against this
+# config locally.
+migrations_dir = "migrations"
+
+[vars]
+BUDGET_CAP_MONTHLY = "35"
+RETENTION_DAYS = "365"
+NEAR_MISS_RETENTION_DAYS = "30"
+RELEVANCE_THRESHOLD = "0.4"
+NEAR_MISS_FLOOR = "0.25"
+PRIMER_AUTH_MODE = "dev-header"
+PRIMER_DEV_USER = "test@example.com"
+ANTHROPIC_API_KEY = ""
+LINEAR_API_KEY = ""
+SLACK_TOKEN = ""
+INCIDENT_IO_API_KEY = ""
+GITHUB_TOKEN = ""
+GITHUB_ORG = "test-org"

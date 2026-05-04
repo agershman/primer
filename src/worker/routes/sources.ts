@@ -1,25 +1,10 @@
 import { Hono } from "hono";
+import { isSourceId, SOURCE_DESCRIPTIONS } from "../../shared/sources.js";
 import { listSourceInstances } from "../db/source-instance-queries.js";
 import { llmClient } from "../integrations/llm/dispatcher.js";
 import { suggestEnabledSources } from "../services/source-suggester.js";
 import { sourceRegistry } from "../sources/index.js";
 import type { Env, UserContext } from "../types.js";
-
-/**
- * Short, neutral description per source kind. Surfaced to the LLM
- * suggester (so it can reason about fit) and to the SourcesOverview
- * panel as helper text. Kept in one place so we don't sprinkle
- * marketing copy across the registry.
- */
-const SOURCE_DESCRIPTIONS: Record<string, string> = {
-  linear: "Issues and projects from Linear — surfaces engineering work in flight.",
-  slack: "Recent Slack threads — captures cross-team discussion and decisions.",
-  github: "Recent GitHub PRs and issues — surfaces what your engineers are shipping.",
-  "incident-io": "Active and recent incidents from incident.io — high-signal context for SREs and platform engineers.",
-  hn: "Hacker News story feeds — broad tech news and discussion.",
-  rss: "Configured RSS / Atom feeds — vendor blogs, conference proceedings, newsletters.",
-  arxiv: "ArXiv paper feeds — research-heavy, useful for ML / systems researchers.",
-};
 
 type AppEnv = { Bindings: Env; Variables: { user: UserContext } };
 
@@ -38,7 +23,7 @@ sourcesRoutes.get("/sources", async (c) => {
       name: provider.name,
       multiInstance: provider.multiInstance,
       available,
-      description: SOURCE_DESCRIPTIONS[provider.id] ?? null,
+      description: isSourceId(provider.id) ? SOURCE_DESCRIPTIONS[provider.id] : null,
       settingsManifest: provider.settingsManifest ?? null,
       userFields: provider.userFields ?? null,
     };
@@ -81,7 +66,7 @@ sourcesRoutes.post("/sources/suggest-enabled", async (c) => {
   const available = sourceRegistry.getAvailable(env).map((p) => ({
     id: p.id,
     name: p.name,
-    description: SOURCE_DESCRIPTIONS[p.id],
+    description: isSourceId(p.id) ? SOURCE_DESCRIPTIONS[p.id] : undefined,
   }));
 
   const llm = llmClient(env);

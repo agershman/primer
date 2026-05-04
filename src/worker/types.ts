@@ -1,3 +1,5 @@
+import type { SourceId } from "../shared/sources.js";
+
 export interface Env {
   DB: D1Database;
   AI: Ai;
@@ -66,8 +68,13 @@ export interface UserSettings {
    * onboarding; existing users get backfilled with the full set in
    * migration 0004. The briefing pipeline filters singleton providers
    * and `source_instances` against this list before fetching.
+   *
+   * Typed as `SourceId[]` (literal union from `shared/sources.ts`)
+   * rather than `string[]` so a typo'd id is a compile error rather
+   * than a silent runtime no-op — see migration 0005 for the kind
+   * of bug that costs us.
    */
-  enabledSourceIds?: string[];
+  enabledSourceIds?: SourceId[];
 }
 
 export function resolveFilterPrompt(settings: UserSettings, sourceId?: string): string | null {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { SourceId } from "../../shared/sources";
 import { apiGet, apiPatch, apiPost } from "../utils/api";
 
 export interface LinearSourceSettings {
@@ -110,9 +111,11 @@ export interface UserSettingsData {
    * Per-user opt-in list of source IDs (e.g. `["linear", "rss"]`).
    * Sources not in this list don't fan into the user's briefing.
    * Brand-new users land on `[]`; existing users were backfilled
-   * with everything in migration 0004.
+   * with everything in migration 0004. Typed as `SourceId[]` so a
+   * typo'd id is a compile error rather than a silent runtime
+   * miss — see `shared/sources.ts` for the canonical list.
    */
-  enabledSourceIds: string[];
+  enabledSourceIds: SourceId[];
 }
 
 export interface AvailableModel {
@@ -318,7 +321,12 @@ export function useSettings(): UseSettingsResult {
       },
       filterPrompt: s.filterPrompt ?? null,
       sourceFilterOverrides: s.sourceFilterOverrides ?? {},
-      enabledSourceIds: Array.isArray(s.enabledSourceIds) ? s.enabledSourceIds : [],
+      // The wire shape comes back as `SourceId[]` already (settings
+      // route filters unknown IDs out), but defensively narrow on
+      // read in case an older deploy persisted a malformed value.
+      enabledSourceIds: Array.isArray(s.enabledSourceIds)
+        ? (s.enabledSourceIds.filter((v): v is SourceId => typeof v === "string") as SourceId[])
+        : [],
     };
   }, []);
 

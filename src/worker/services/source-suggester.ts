@@ -169,7 +169,7 @@ Output JSON with this exact shape (no other keys, no prose):
  * should enable. Distinct from `suggestSourceInstances` (which
  * proposes RSS feed URLs); this one looks at the user's persona +
  * focus and decides whether each registered source kind (linear,
- * slack, github, incident-io, hn, rss, arxiv) is likely to be useful
+ * slack, github, incident_io, hn, rss, arxiv) is likely to be useful
  * for them.
  *
  * The output drives the visual highlight on the onboarding "sources"

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { isSourceId, type SourceId } from "../../shared/sources";
 import type { SourceDescriptor } from "../sources/types";
 import { apiGet, apiPatch, apiPost } from "../utils/api";
 import { DictationButton } from "./DictationButton";
 import { RefineDialog } from "./RefineDialog";
 
 interface SourceSuggestion {
-  id: string;
+  id: SourceId;
   recommended: boolean;
   rationale: string;
 }
@@ -85,9 +86,11 @@ export function FirstRunSetup({ initialAbout, initialFocus, onComplete, onSkip }
   // deployment exposes, with no checkbox pre-selected — the AI's role
   // is purely advisory through `suggestionById`, which highlights the
   // recommended ones and shows their rationale.
-  const [availableSources, setAvailableSources] = useState<Array<SourceDescriptor & { available: boolean }>>([]);
+  const [availableSources, setAvailableSources] = useState<
+    Array<SourceDescriptor & { id: SourceId; available: boolean }>
+  >([]);
   const [suggestionById, setSuggestionById] = useState<Record<string, SourceSuggestion>>({});
-  const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set());
+  const [selectedSources, setSelectedSources] = useState<Set<SourceId>>(new Set());
   const [sourcesLoading, setSourcesLoading] = useState(false);
 
   // If the user already had something saved, skip past the intro.
@@ -152,18 +155,24 @@ export function FirstRunSetup({ initialAbout, initialFocus, onComplete, onSkip }
       apiPost<{ suggestions: SourceSuggestion[] }>("/api/sources/suggest-enabled", {}),
     ]).then((results) => {
       if (results[0].status === "fulfilled") {
-        setAvailableSources(results[0].value.sources.filter((s) => s.available));
+        setAvailableSources(
+          results[0].value.sources.filter(
+            (s): s is SourceDescriptor & { id: SourceId; available: boolean } => s.available && isSourceId(s.id),
+          ),
+        );
       }
       if (results[1].status === "fulfilled") {
         const map: Record<string, SourceSuggestion> = {};
-        for (const s of results[1].value.suggestions) map[s.id] = s;
+        for (const s of results[1].value.suggestions) {
+          if (isSourceId(s.id)) map[s.id] = s;
+        }
         setSuggestionById(map);
       }
       setSourcesLoading(false);
     });
   }, [step]);
 
-  const toggleSource = (id: string) => {
+  const toggleSource = (id: SourceId) => {
     setSelectedSources((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);

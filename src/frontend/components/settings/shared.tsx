@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import type { SourceId } from "../../../shared/sources";
 import type { PreviewSourceState } from "../../hooks/useSettings";
+import { useSettingsCtx } from "./SettingsContext";
 
 /**
  * Shared building blocks for the settings panels.
@@ -16,6 +18,60 @@ export function PanelHeader({ title, description }: { title: string; description
     <div className="mb-4">
       <h3 className="text-base font-semibold text-text-primary">{title}</h3>
       <p className="mt-0.5 text-xs font-mono text-text-dim leading-relaxed">{description}</p>
+    </div>
+  );
+}
+
+/**
+ * Inline enable/disable switch for a single source kind. Drops into
+ * the top of any per-source panel, binding directly to the user's
+ * `enabledSourceIds` array via `useSettingsCtx`. Returns whether the
+ * source is currently enabled so the caller can decide what to render
+ * underneath — by convention, panels hide their per-source filters
+ * (channels, repos, statuses) when the toggle is off, since those
+ * settings are irrelevant if the source isn't fanning into briefings.
+ */
+export function useSourceEnabled(sourceId: SourceId): {
+  enabled: boolean;
+  setEnabled: (next: boolean) => void;
+} {
+  const { settings } = useSettingsCtx();
+  const { settings: data, updateSettings } = settings;
+  const enabled = (data?.enabledSourceIds ?? []).includes(sourceId);
+  const setEnabled = (next: boolean) => {
+    const current = new Set<SourceId>(data?.enabledSourceIds ?? []);
+    if (next) current.add(sourceId);
+    else current.delete(sourceId);
+    updateSettings({ enabledSourceIds: Array.from(current) });
+  };
+  return { enabled, setEnabled };
+}
+
+export function SourceEnabledRow({
+  enabled,
+  onChange,
+  label = "Include in my briefings",
+  hint,
+}: {
+  enabled: boolean;
+  onChange: (next: boolean) => void;
+  label?: string;
+  hint?: ReactNode;
+}) {
+  return (
+    <div className="mb-4 rounded-lg border border-border-subtle bg-bg-warm p-3">
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onChange(e.target.checked)}
+          className="mt-0.5 h-4 w-4 rounded border-border accent-accent shrink-0"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-semibold text-text-primary">{label}</div>
+          {hint && <div className="mt-0.5 text-[11px] font-mono text-text-dim leading-relaxed">{hint}</div>}
+        </div>
+      </label>
     </div>
   );
 }

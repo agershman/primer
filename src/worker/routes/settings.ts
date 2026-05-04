@@ -1,7 +1,7 @@
 import { Hono } from "hono";
+import { isSourceId, type SourceId } from "../../shared/sources.js";
 import { createLinearClient, fetchTeams } from "../integrations/linear.js";
 import { SlackClient } from "../integrations/slack.js";
-import { sourceRegistry } from "../sources/index.js";
 import type { Env, UserContext } from "../types.js";
 
 type AppEnv = { Bindings: Env; Variables: { user: UserContext } };
@@ -121,8 +121,17 @@ settingsRoutes.patch("/settings", async (c) => {
     if (!Array.isArray(enabledSourceIds)) return c.json({ error: "enabledSourceIds must be an array of strings" }, 400);
     if (!enabledSourceIds.every((v) => typeof v === "string"))
       return c.json({ error: "enabledSourceIds must contain only strings" }, 400);
-    const knownIds = new Set(sourceRegistry.getAll().map((p) => p.id));
-    const cleaned = Array.from(new Set((enabledSourceIds as string[]).filter((id) => knownIds.has(id))));
+    // Validate against the canonical literal union from
+    // `shared/sources.ts` rather than the live registry — they're
+    // the same set, but the literal union is the contract the
+    // frontend types against, so checking the same list keeps the
+    // two trust boundaries in lockstep. Unknown IDs are dropped
+    // (rather than rejected) for the same reason migration 0004's
+    // backfill would have been: a deployment can shrink its source
+    // list and we don't want stale entries to brick the PATCH.
+    const cleaned: SourceId[] = Array.from(
+      new Set((enabledSourceIds as string[]).filter((id): id is SourceId => isSourceId(id))),
+    );
     updates.push("enabled_source_ids = ?");
     binds.push(JSON.stringify(cleaned));
   }
@@ -158,11 +167,13 @@ settingsRoutes.patch("/settings", async (c) => {
     /* ignore */
   }
 
-  let updatedEnabledSourceIds: string[] = [];
+  let updatedEnabledSourceIds: SourceId[] = [];
   try {
     if (settingsRow?.enabled_source_ids) {
       const parsed = JSON.parse(settingsRow.enabled_source_ids);
-      if (Array.isArray(parsed)) updatedEnabledSourceIds = parsed.filter((v): v is string => typeof v === "string");
+      if (Array.isArray(parsed)) {
+        updatedEnabledSourceIds = parsed.filter((v): v is SourceId => typeof v === "string" && isSourceId(v));
+      }
     }
   } catch {
     /* ignore */

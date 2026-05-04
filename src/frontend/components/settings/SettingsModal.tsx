@@ -16,7 +16,6 @@ import { LimitsPanel } from "./panels/LimitsPanel";
 import { LinearPanel } from "./panels/LinearPanel";
 import { ModelsPanel } from "./panels/ModelsPanel";
 import { SlackPanel } from "./panels/SlackPanel";
-import { SourcesOverviewPanel } from "./panels/SourcesOverviewPanel";
 import { UsersPanel } from "./panels/UsersPanel";
 import { VoicePanel } from "./panels/VoicePanel";
 import { SettingsProvider, type SettingsUserProp, type TtsModelDescriptor } from "./SettingsContext";
@@ -73,20 +72,16 @@ const SOURCE_ICONS: Record<string, () => ReactNode> = {
 
 const STATIC_NAV: NavEntry[] = [
   {
-    id: "sources",
-    group: "Sources",
-    label: "Sources",
-    icon: <IconFeeds />,
-    Component: SourcesOverviewPanel,
-    keywords: ["sources", "enable", "disable", "toggle", "linear", "slack", "github", "rss", "hn", "arxiv", "incident"],
-  },
-  {
     id: "feeds",
     group: "Sources",
     label: "Feeds",
     icon: <IconFeeds />,
     Component: FeedsPanel,
-    keywords: ["rss", "feeds", "blog", "external", "hacker news", "arxiv", "newsletter"],
+    // Each per-source panel now carries its own enable/disable
+    // toggle inline; "enable" / "disable" / "toggle" stay searchable
+    // here so a user typing those still lands on Feeds (the only
+    // panel that hosts toggles for three kinds at once).
+    keywords: ["rss", "feeds", "blog", "external", "hacker news", "arxiv", "newsletter", "enable", "disable", "toggle"],
   },
   {
     id: "models",
@@ -311,16 +306,25 @@ export function SettingsModal({ settings, user, onClose, onUserChanged }: Settin
 
   const isAdmin = user?.isAdmin === true;
 
-  // Regular users only see Personalization (About / Focus / Relevance
-  // filter) plus their own Sources opt-in toggles plus Account —
-  // everything else is a deployment-wide setting reserved for the
-  // admin. The server enforces the same gates on the underlying
-  // mutations, so hiding them client-side is a UX hint, not a
-  // security boundary. `"sources"` is on the per-user list because
-  // it's the new SourcesOverviewPanel that toggles `enabledSourceIds`
-  // — a user-level field, distinct from the admin-only per-source
-  // detail panels.
-  const REGULAR_USER_PANEL_IDS = new Set(["about", "focus", "filter", "sources", "account"]);
+  // Regular users see Personalization (About / Focus / Relevance
+  // filter) plus the per-source panels and Feeds — they need those
+  // panels to flip their own `enabledSourceIds` toggle on or off.
+  // The deployment-wide config inside each panel (channels, repos,
+  // status filters, model picks) is still admin-gated by the server's
+  // PATCH /settings 403 on `signalSurfaceMap`; hiding the panels
+  // entirely from non-admins would leave them no way to opt out of
+  // sources that don't fit their role.
+  const REGULAR_USER_PANEL_IDS = new Set([
+    "about",
+    "focus",
+    "filter",
+    "linear",
+    "slack",
+    "github",
+    "incident_io",
+    "feeds",
+    "account",
+  ]);
 
   const NAV = useMemo(() => {
     const sourceEntries = buildSourceNavEntries(apiSources, sourceConfig, handleSourceConfigChange);
