@@ -36,16 +36,15 @@ test.describe("First-run onboarding → sources step → PATCH /api/settings", (
     await expect(page.getByRole("button", { name: /Get started/ })).toBeVisible();
     await page.getByRole("button", { name: /Get started/ }).click();
 
-    // About step — needs >= 30 chars.
-    await page.getByPlaceholder(/.*/, { exact: false }).first().fill(
-      "I'm a platform engineer with six years of infra experience.",
-    );
+    // About step — needs >= 30 chars. Each wizard step renders
+    // exactly one textarea, so target it directly rather than via
+    // `getByPlaceholder(/.*/)` which over-matches in chromium when
+    // the page has any other placeholder-bearing input mounted.
+    await page.locator("textarea").first().fill("I'm a platform engineer with six years of infra experience.");
     await page.getByRole("button", { name: /Continue/ }).click();
 
-    // Focus step — needs >= 20 chars. The dictation/ refine UI
-    // are stable selectors but the textarea is the only element
-    // that matters for the flow.
-    await page.locator("textarea").fill("kubernetes operators, observability, distributed systems");
+    // Focus step — needs >= 20 chars.
+    await page.locator("textarea").first().fill("kubernetes operators, observability, distributed systems");
     await page.getByRole("button", { name: /Continue/ }).click();
 
     // Sources step — wait for the LLM-driven suggestions to
