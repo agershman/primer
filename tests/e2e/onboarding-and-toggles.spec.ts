@@ -33,22 +33,33 @@ test.describe("First-run onboarding → sources step → PATCH /api/settings", (
 
     // Onboarding overlay mounts because /api/me returns no
     // about/focus (DEFAULT_USER in api-mocks.ts).
-    await expect(page.getByRole("button", { name: /Get started/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Welcome to Primer/ })).toBeVisible();
     await page.getByRole("button", { name: /Get started/ }).click();
 
     // About step — needs >= 30 chars. Each wizard step renders
     // exactly one textarea, so target it directly rather than via
     // `getByPlaceholder(/.*/)` which over-matches in chromium when
     // the page has any other placeholder-bearing input mounted.
+    //
+    // Wait for the step heading before filling — `setStep` schedules
+    // a React commit, but Playwright's auto-wait on `.first()` will
+    // happily resolve to the previous step's textarea if the commit
+    // hasn't landed yet, leaving the new step's draft empty and the
+    // Continue button disabled. Anchoring on the heading gives us a
+    // sync point that only flips once React has actually rendered
+    // the new step.
+    await expect(page.getByRole("heading", { name: /Tell us about you/ })).toBeVisible();
     await page.locator("textarea").first().fill("I'm a platform engineer with six years of infra experience.");
     await page.getByRole("button", { name: /Continue/ }).click();
 
     // Focus step — needs >= 20 chars.
+    await expect(page.getByRole("heading", { name: /What do you want to learn/ })).toBeVisible();
     await page.locator("textarea").first().fill("kubernetes operators, observability, distributed systems");
     await page.getByRole("button", { name: /Continue/ }).click();
 
-    // Sources step — wait for the LLM-driven suggestions to
-    // resolve and the four checkboxes to render.
+    // Sources step — wait for the heading, then for the LLM-driven
+    // suggestions to resolve and the four checkboxes to render.
+    await expect(page.getByRole("heading", { name: /Pick your sources/ })).toBeVisible();
     await expect(page.locator('input[type="checkbox"]')).toHaveCount(4, { timeout: 10_000 });
 
     // Suggested sources surface a "✨ suggested" badge.
