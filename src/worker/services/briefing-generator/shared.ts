@@ -23,7 +23,7 @@
 
 import { RETRY_CONFIG, retryDelay } from "../../config/constants.js";
 import { listSourceInstances } from "../../db/source-instance-queries.js";
-import type { WorkContextItem } from "../../sources/index.js";
+import type { SourceProvider, WorkContextItem } from "../../sources/index.js";
 
 // Path is relative to `src/worker/services/briefing-generator/shared.ts`.
 //
@@ -160,4 +160,32 @@ export async function summarizeFeedSources(
   }
   const ellipsis = total > labels.length ? "…" : "";
   return { labels, total, suffix: ` (${labels.join(", ")}${ellipsis})` };
+}
+
+/**
+ * Filter the registry's singleton providers down to those the user
+ * has opted in to via `enabledSourceIds`. Pulled out as a pure
+ * helper so the briefing-pipeline gate is testable without
+ * standing up the full pipeline (D1, LLM, settings row, etc.) —
+ * see `tests/unit/briefing-pipeline-gate.test.ts`.
+ *
+ * Semantics:
+ *   - `undefined` enabled list = nothing is filtered (preserves
+ *     pre-feature behaviour for any test or codepath that hasn't
+ *     loaded settings yet).
+ *   - empty array = nothing fans out. Caller's downstream pipeline
+ *     handles the empty `workContext` case.
+ *   - any provider whose id is in the list is kept.
+ *
+ * Type note: `enabledSourceIds` is `SourceId[]` upstream but
+ * provider.id is generic `string`, so we widen to `Set<string>`
+ * for the membership check. Runtime semantics are identical.
+ */
+export function selectEnabledSingletons(
+  providers: SourceProvider[],
+  enabledSourceIds: readonly string[] | undefined,
+): SourceProvider[] {
+  if (enabledSourceIds === undefined) return providers;
+  const enabled: Set<string> = new Set(enabledSourceIds);
+  return providers.filter((p) => enabled.has(p.id));
 }

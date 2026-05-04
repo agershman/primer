@@ -82,7 +82,12 @@ describe("Briefing pipeline gates on enabled source IDs", () => {
   it("singleton fan-out filters providers against the user's enabled list", async () => {
     const src = await read("src/worker/services/briefing-generator.ts");
     expect(src).toMatch(/userSettings\?\.enabledSourceIds/);
-    expect(src).toMatch(/sourceRegistry[\s\S]{0,80}getSingletons\(env\)[\s\S]{0,200}\.filter/);
+    // Gate is now delegated to `selectEnabledSingletons`
+    // (briefing-generator/shared.ts) so the pure function is
+    // pinnable by a unit test without standing up the rest of
+    // the pipeline. See tests/unit/briefing-pipeline-gate.test.ts
+    // for the behavioural assertions.
+    expect(src).toMatch(/selectEnabledSingletons\(\s*sourceRegistry\.getSingletons\(env\)/);
   });
 
   it("adjacent-scanner accepts an enabledSourceIds option and filters by instance kind", async () => {

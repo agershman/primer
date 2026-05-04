@@ -67,6 +67,7 @@ import {
   CancelledError,
   checkCancelled,
   safeStep,
+  selectEnabledSingletons,
   summarizeFeedSources,
   summarizeWorkContextSources,
   updateProgress,
@@ -199,22 +200,15 @@ export async function generateDailyBriefing(
 
     await updateProgress(db, briefingId, "work_context", "Fetching work context…");
 
-    // Per-user opt-in gate. The user's `enabledSourceIds` (migration
-    // 0004) is the authoritative list of source kinds that should fan
-    // into THIS user's briefing — disabled sources skip their fetch
-    // entirely so we don't burn HTTP budget on data that gets thrown
-    // away. An undefined list means we haven't loaded settings (older
-    // code paths / tests); an empty list means the user has explicitly
-    // opted out of everything and the briefing builds with no work
-    // context, which the rest of the pipeline already handles.
-    // Narrow `SourceId[]` to a generic `Set<string>` for the
-    // membership check — `provider.id` on the SourceProvider
-    // interface is `string` (the registry predates the canonical
-    // literal union), so this hop avoids a type-incompatible
-    // `Set<SourceId>` lookup. Runtime semantics are identical: a
-    // provider whose id isn't in the user's opt-in list is skipped.
-    const enabledSourceIds: Set<string> = new Set(userSettings?.enabledSourceIds ?? []);
-    const singletonProviders = sourceRegistry.getSingletons(env).filter((p) => enabledSourceIds.has(p.id));
+    // Per-user opt-in gate — disabled sources skip their fetch
+    // entirely so we don't burn HTTP budget on data that gets
+    // thrown away. The gate logic lives in `selectEnabledSingletons`
+    // (see briefing-generator/shared.ts) so it's pinned by a unit
+    // test that doesn't need the rest of the pipeline standing up.
+    const singletonProviders = selectEnabledSingletons(
+      sourceRegistry.getSingletons(env),
+      userSettings?.enabledSourceIds,
+    );
     const fetchCtx: SourceFetchContext = {
       env,
       db,
