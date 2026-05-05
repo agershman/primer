@@ -83,7 +83,11 @@ export function contentBlocksToSpokenText(blocks: ContentBlock[] | null | undefi
   for (const block of blocks) {
     if (block.type === "code" || block.type === "diagram") continue;
     if (typeof block.value === "string" && block.value.trim().length > 0) {
-      speakable.push(block.value);
+      // Glossary markers `[[term||definition]]` are stripped to the
+      // term in the worker's TTS path (`contentToPlainText`); strip
+      // them here too so the duration estimate doesn't double-count
+      // the (unspoken) definition text.
+      speakable.push(block.value.replace(/\[\[(.+?)\|\|.+?\]\]/g, "$1"));
     }
   }
   return speakable.join("\n\n");
