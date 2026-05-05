@@ -69,7 +69,7 @@ briefingReadRoutes.get("/briefing/today", async (c) => {
     return c.json({ briefing: null, pieces: [], quiz: null });
   }
 
-  const pieces = await c.env.DB.prepare("SELECT * FROM teaching_pieces WHERE briefing_id = ? ORDER BY position")
+  const pieces = await c.env.DB.prepare("SELECT * FROM teaching_pieces WHERE briefing_id = ? ORDER BY position DESC")
     .bind(briefing.id)
     .all();
 
@@ -203,7 +203,7 @@ briefingReadRoutes.get("/briefing/:date", async (c) => {
     return c.json({ error: "No briefing for this date" }, 404);
   }
 
-  const pieces = await c.env.DB.prepare("SELECT * FROM teaching_pieces WHERE briefing_id = ? ORDER BY position")
+  const pieces = await c.env.DB.prepare("SELECT * FROM teaching_pieces WHERE briefing_id = ? ORDER BY position DESC")
     .bind(briefing.id)
     .all();
 
@@ -335,13 +335,14 @@ briefingReadRoutes.get("/briefings", async (c) => {
   if (briefingIds.length > 0) {
     const placeholders = briefingIds.map(() => "?").join(",");
 
-    // Pull every piece in one shot, ordered by position so the
-    // first-N titles we surface match the on-page reading order.
+    // Pull every piece in one shot, ordered by position DESC so the
+    // first-N titles we surface match the on-page reading order
+    // (newest piece first within each briefing).
     const pieces = await c.env.DB.prepare(
       `SELECT briefing_id, title, position, concepts
        FROM teaching_pieces
        WHERE briefing_id IN (${placeholders}) AND user_id = ?
-       ORDER BY briefing_id, position ASC`,
+       ORDER BY briefing_id, position DESC`,
     )
       .bind(...briefingIds, user.userId)
       .all<{ briefing_id: string; title: string; position: number; concepts: string }>();

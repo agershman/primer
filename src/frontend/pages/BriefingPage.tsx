@@ -122,18 +122,17 @@ export function BriefingPage() {
     // ─── Due-date prioritization ─────────────────────────────────
     // Pieces with a `due_at` come first, sorted by soonest deadline.
     // Pieces without a due date come after, in their original
-    // position-from-the-server order. Within a single due-date day,
+    // server order — which is reverse chronological (newest piece
+    // first) within the briefing. Within a single due-date day,
     // ties are broken alphanumerically on title so the order stays
     // stable across renders even when two tickets share a deadline.
     //
-    // Why client-side sort: the underlying `position` field is the
-    // generator's chosen reading order, which we still want to fall
-    // back to for non-dated pieces. Doing this on the client keeps
-    // the server's existing sort semantics intact and lets the user
-    // see pieces stream in (the regenerate flow patches a single
-    // piece in place; that patch shouldn't reshuffle the whole list
-    // every keystroke). The sort is stable: pieces without dates
-    // keep their original index, so the only re-orderings come from
+    // Why client-side sort: doing this on the client keeps the
+    // server's existing sort semantics intact and lets the user see
+    // pieces stream in (the regenerate flow patches a single piece
+    // in place; that patch shouldn't reshuffle the whole list every
+    // keystroke). The sort is stable: pieces without dates keep
+    // their original index, so the only re-orderings come from
     // dated pieces "bubbling" to the top.
     return merged
       .map((p, idx) => ({ p, idx }))
