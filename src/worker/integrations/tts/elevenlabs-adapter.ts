@@ -45,6 +45,25 @@ export class ElevenLabsTtsAdapter implements TtsAdapter {
     const streamPromises = chunks.map(
       (chunk): Promise<ReadableStream<Uint8Array>> => fetchElevenLabsChunk(apiKey, chunk, modelId, voiceId),
     );
+    // Await response *headers* (not body) for every chunk before
+    // returning. Body streaming still happens lazily inside
+    // `streamingTtsResponse`, so time-to-first-audio is bounded by the
+    // slowest TTFB across parallel fetches — typically near-identical
+    // since every chunk targets the same `/stream` endpoint.
+    //
+    // Without this, a non-2xx upstream (401 bad key, 429 rate limit,
+    // voice-not-found, free-tier concurrency cap, …) throws inside the
+    // streaming response's `start(controller)` *after* the worker has
+    // already flushed `200 OK + audio/mpeg` headers. The route's
+    // try/catch never sees the error, `audioErrorResponse` never runs,
+    // no `X-Audio-Error` header is set — the browser just sees a
+    // truncated MP3, fires `<audio>.error`, and AudioPlayer renders a
+    // bare "Audio unavailable" with no diagnostic.
+    //
+    // Awaiting here surfaces the error synchronously so it propagates
+    // through `audioErrorResponse` with the proper 502 + `X-Audio-
+    // Error` header the player reads on its diagnostic refetch.
+    await Promise.all(streamPromises);
     return {
       response: streamingTtsResponse(streamPromises),
       charCount: text.length,
