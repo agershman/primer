@@ -37,8 +37,7 @@ import { type AppNotification, useNotifications } from "../hooks/useNotification
  * because they belong to the ActivityIndicator).
  */
 export function NotificationBell() {
-  const { notifications, unreadCount, refresh, acknowledge, acknowledgeAll, dismiss, dismissAll } =
-    useNotifications();
+  const { notifications, unreadCount, refresh, acknowledge, acknowledgeAll, dismiss, dismissAll } = useNotifications();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement | null>(null);
