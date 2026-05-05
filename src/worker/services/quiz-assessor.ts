@@ -38,6 +38,9 @@ export interface QuizGenerationOptions {
   modelSpec?: ModelSpec;
   /** "About me" persona — calibrates difficulty + framing for this reader. */
   aboutStatement?: string | null;
+  /** "Current focus" statement — biases question framing toward angles
+   *  relevant to what the reader is currently steering toward. */
+  focusStatement?: string | null;
 }
 
 function defaultQuizGenSpec(): ModelSpec {
@@ -64,14 +67,19 @@ export async function generateQuiz(
 ): Promise<GeneratedQuiz> {
   const spec = options.modelSpec ?? defaultQuizGenSpec();
   const aboutStatement = options.aboutStatement ?? null;
+  const focusStatement = options.focusStatement ?? null;
   const depthLabel = DEPTH_LABELS[Math.floor(depthScore)] ?? "Unknown";
 
   const aboutBlock = aboutStatement
     ? `\nABOUT THE READER (calibrate question framing — assume their stated experience level, do not over-explain basics they likely know):\n${aboutStatement.trim()}\n`
     : "";
 
+  const focusBlock = focusStatement
+    ? `\nCURRENT FOCUS — what the reader is steering toward right now. When this concept intersects their focus, prefer questions that probe the angles most relevant to that direction. Never quote the focus back:\n${focusStatement.trim()}\n`
+    : "";
+
   const system = `You generate calibration questions to assess a person's understanding depth.
-${aboutBlock}
+${aboutBlock}${focusBlock}
 The question should be open-ended and reveal HOW DEEPLY they understand the concept, not just whether they've heard of it.
 
 Current estimated depth: ${depthScore.toFixed(1)} (${depthLabel})

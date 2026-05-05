@@ -93,22 +93,52 @@ briefingLifecycleRoutes.post("/briefing/generate", async (c) => {
     return c.json({ status: "generating", pollUrl: "/api/briefing/status" }, 202);
   }
 
-  // Either stale/done OR a zombie that we can safely replace.
-  // Clear quizzes linked to teaching pieces first — the quiz FK to
-  // teaching_pieces lacks ON DELETE CASCADE, so cascade from briefings
-  // would violate the constraint.
+  // Refresh policy: PRESERVE the existing briefing and its teaching
+  // pieces. The earlier behavior was to delete the row + cascade-delete
+  // every piece, then regenerate from scratch — fine when generation
+  // was stable, but harmful once the focus statement actually steers
+  // selection. A user who edits their focus and refreshes shouldn't
+  // lose the pieces shaped by their prior focus; those are still
+  // valid teaching, just shaped by an earlier direction. The generator
+  // detects an in-place existing briefing and runs in additive mode,
+  // appending up to BRIEFING_RULES.MAX_REFRESH_ADDITIONS new pieces
+  // that don't duplicate existing concepts.
+  //
+  // Two cases still need cleanup before reuse:
+  //   - Zombie: a stuck "generating" row whose generator is dead. We
+  //     reset its status to "generated" (no pieces are at risk; the
+  //     real ones survive) so the additive path picks up safely.
+  //   - Failed: a previous attempt errored before writing any pieces.
+  //     Same story — clear status to allow retry without rebuild.
+  //
+  // The `POST /briefing/reset` endpoint remains the explicit
+  // "wipe-and-start-over" escape hatch for users who genuinely want
+  // to throw away their existing briefing.
+  const { genId } = await import("../../db/queries.js");
+  let briefingId: string;
   if (existing) {
+    briefingId = existing.id;
+    // Reset metadata + status so the streamer doesn't read a stale
+    // "step: failed" payload from the prior run. Pieces stay intact;
+    // the generator detects additive mode by querying for them.
     await db
       .prepare(
-        `UPDATE calibration_quizzes SET teaching_piece_id = NULL
-         WHERE user_id = ? AND teaching_piece_id IN (
-           SELECT id FROM teaching_pieces WHERE briefing_id = ?
-         )`,
+        `UPDATE briefings SET status = 'generating', cancel_requested = 0,
+                              metadata = ?, updated_at = datetime('now')
+         WHERE id = ?`,
       )
-      .bind(user.userId, existing.id)
+      .bind(JSON.stringify({ step: "starting", stepLabel: "Refreshing briefing..." }), briefingId)
+      .run();
+  } else {
+    briefingId = genId("briefing");
+    await db
+      .prepare(
+        `INSERT INTO briefings (id, user_id, briefing_date, generated_at, status, metadata, created_at, updated_at)
+         VALUES (?, ?, ?, datetime('now'), 'generating', ?, datetime('now'), datetime('now'))`,
+      )
+      .bind(briefingId, user.userId, today, JSON.stringify({ step: "starting", stepLabel: "Starting generation..." }))
       .run();
   }
-  await db.prepare("DELETE FROM briefings WHERE user_id = ? AND briefing_date = ?").bind(user.userId, today).run();
 
   // Stale briefing_generation notifications from a previous run get
   // dismissed here so a fresh kick-off owns its own notification row.
@@ -123,16 +153,6 @@ briefingLifecycleRoutes.post("/briefing/generate", async (c) => {
        WHERE user_id = ? AND kind = ? AND status = 'in_progress'`,
     )
     .bind(user.userId, BRIEFING_NOTIFICATION_KIND)
-    .run();
-
-  const { genId } = await import("../../db/queries.js");
-  const briefingId = genId("briefing");
-  await db
-    .prepare(
-      `INSERT INTO briefings (id, user_id, briefing_date, generated_at, status, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, datetime('now'), 'generating', ?, datetime('now'), datetime('now'))`,
-    )
-    .bind(briefingId, user.userId, today, JSON.stringify({ step: "starting", stepLabel: "Starting generation..." }))
     .run();
 
   // Fire-and-forget notification at the start of generation. The bell

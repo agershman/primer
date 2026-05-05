@@ -190,7 +190,8 @@ export type ModelOperation =
   | "quizGeneration"
   | "quizAssessment"
   | "chat"
-  | "continuationClassifier";
+  | "continuationClassifier"
+  | "focusScoring";
 
 export const DEFAULT_MODELS: Record<ModelOperation, ModelId> = {
   conceptExtraction: "claude-haiku-4-5-20251001",
@@ -204,6 +205,11 @@ export const DEFAULT_MODELS: Record<ModelOperation, ModelId> = {
   // Haiku is more than capable here and keeps the per-piece overhead
   // negligible relative to the teaching-piece generation it gates.
   continuationClassifier: "claude-haiku-4-5-20251001",
+  // One-shot ranking call — score each teaching-target candidate
+  // against the user's focus statement. Same shape as adjacent
+  // scoring (short JSON, structured output), so Haiku is the right
+  // default tier.
+  focusScoring: "claude-haiku-4-5-20251001",
 };
 
 /**

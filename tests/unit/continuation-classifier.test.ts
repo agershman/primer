@@ -471,10 +471,14 @@ describe("pipeline wiring (briefing-generator)", () => {
 
   it("the INSERT writes series_id and part_number alongside the new piece", async () => {
     const src = await read("src/worker/services/briefing-generator.ts");
-    expect(src).toContain("series_id, part_number, created_at)");
-    // The bind list ends with seriesId and partNumber, immediately
+    // `focus_version_id` joined the column list after series_id /
+    // part_number so each piece can be attributed to the focus
+    // statement that shaped it (used by the additive-refresh path).
+    expect(src).toContain("series_id, part_number, focus_version_id, created_at)");
+    // The bind list still has seriesId and partNumber as the
+    // continuation fields, now followed by focusVersionId immediately
     // before the trailing closing `)` of the bind() call.
-    expect(src).toMatch(/seriesId,\s*\n?\s*partNumber,\s*\n?\s*\)/);
+    expect(src).toMatch(/seriesId,\s*\n?\s*partNumber,\s*\n?\s*focusVersionId,\s*\n?\s*\)/);
   });
 
   it("REDUNDANT entries snapshot the predecessor's briefing_date for the chip's deep link", async () => {

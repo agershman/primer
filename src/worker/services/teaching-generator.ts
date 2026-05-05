@@ -59,6 +59,11 @@ export interface TeachingGenerateOptions {
   modelSpec?: ModelSpec;
   /** "About me" persona text — tailors voice and depth assumptions to the reader. */
   aboutStatement?: string | null;
+  /** "Current focus" statement — steers the angle/framing of the piece
+   *  toward the reader's currently-prioritized direction. Voice is
+   *  governed by About; Focus governs *what aspect* of the topic to
+   *  emphasize when the topic intersects the focus. */
+  focusStatement?: string | null;
   /**
    * When set, the new piece is being written as Part N of a series and
    * the writer should explicitly acknowledge the predecessor. Without
@@ -100,12 +105,17 @@ export async function generateTeachingPiece(
 ): Promise<GeneratedPiece> {
   const spec = options.modelSpec ?? defaultTeachingSpec();
   const aboutStatement = options.aboutStatement ?? null;
+  const focusStatement = options.focusStatement ?? null;
   const pieceType = pieceTypeForDepth(target.depthScore, target.sourceType);
   const wordTarget = WORD_TARGETS[pieceType];
   const depthLabel = DEPTH_LABELS[Math.floor(target.depthScore)] ?? "Unknown";
 
   const aboutBlock = aboutStatement
     ? `\nABOUT THE READER (use this to calibrate voice and depth — never mention it explicitly):\n${aboutStatement.trim()}\n`
+    : "";
+
+  const focusBlock = focusStatement
+    ? `\nCURRENT FOCUS — what the reader is steering toward right now. When this topic intersects their focus, lean into that intersection: emphasize the angles, tradeoffs, and connections most useful for that direction. If the topic is orthogonal to the focus, ignore this block. Never quote it back:\n${focusStatement.trim()}\n`
     : "";
 
   const continuation = options.continuation ?? null;
@@ -124,7 +134,7 @@ Open with a brief one-sentence callback referencing the prior part by name and d
     : "";
 
   const system = `You are a knowledgeable peer writing a concise teaching piece for the reader described below.
-${aboutBlock}${continuationBlock}
+${aboutBlock}${focusBlock}${continuationBlock}
 VOICE: Conversational but precise. Calibrate to the reader: for an engineer this reads like a senior peer at a whiteboard; for a non-technical reader (PM, designer, ops, sales, leadership) this reads like a smart colleague explaining the substance without the jargon. Match the depth and vocabulary the ABOUT block implies — never explain something the reader already knows, never assume jargon the reader doesn't.
 Be evidence-grounded. Cite real tools, projects, or patterns where relevant.
 If the ABOUT block above gave you signals about the reader's tone preferences (e.g. direct, skeptical, no MBA-speak), apply them here without ever quoting them back.

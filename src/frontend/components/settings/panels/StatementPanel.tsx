@@ -17,7 +17,7 @@ const COPY: Record<"about" | "focus", CopyTable> = {
   about: {
     title: "About you",
     description:
-      "Who you are — your role, experience, and communication preferences. Used to tailor voice and depth across all of Primer's AI: teaching pieces, deep dives, chat, briefings, quizzes. Stable; changes rarely. Versioned with full history.",
+      "Who you are: role, experience, and communication preferences. Shapes the voice of every piece of AI-generated content (teaching pieces, deep dives, chat, quizzes) — vocabulary, technical register, tone. Doesn't decide what you see, only how it's written. Stable; changes rarely. Versioned with full history.",
     placeholder:
       "e.g. Senior platform engineer at a small B2B SaaS startup. ~12 years experience, comfortable with deep technical detail; assume I know the basics of Kubernetes, AWS, and Terraform. I learn best from concrete examples and trade-off discussions, not exhaustive overviews. Direct, slightly skeptical tone preferred — no MBA-speak.",
     endpoint: "/api/me/about",
@@ -25,7 +25,7 @@ const COPY: Record<"about" | "focus", CopyTable> = {
   focus: {
     title: "Current focus",
     description:
-      "What you want to learn or focus on right now. Drives concept extraction — biases the system toward topics you care about. Changes more often than About. Versioned with per-version analytics.",
+      "What you're steering toward right now. Drives direction across the whole briefing pipeline: which concepts get extracted from your work, which existing concepts get prioritized for teaching, and what angle each teaching piece and quiz takes. Doesn't change voice or depth — those come from About and your concept mastery. Changes more often than About. Versioned with per-version analytics.",
     placeholder:
       "e.g. Platform/infra engineer focused on Cloudflare Workers, multi-tenant Kubernetes, customer environment provisioning, and reliability. I don't care about people/process topics like standups or OKRs.",
     endpoint: "/api/me/focus",
