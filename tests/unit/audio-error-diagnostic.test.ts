@@ -104,6 +104,24 @@ describe("worker: audio routes use the shared helper", () => {
     expect(src).toMatch(/audioErrorResponse\("chat reply", err\)/);
     expect(src).not.toMatch(/c\.json\(\{ error: "Audio generation failed" \}, 500\)/);
   });
+
+  it("ElevenLabs adapter awaits chunk response headers before returning, so upstream HTTP errors reach audioErrorResponse", async () => {
+    // Pre-fix bug: ElevenLabs HTTP errors (401 bad key, 429 rate
+    // limit, voice-not-allowed, free-tier concurrency cap) threw
+    // inside `streamingTtsResponse`'s `start(controller)` callback —
+    // *after* the worker had already flushed `200 OK + audio/mpeg`.
+    // The route's try/catch never saw the error, audioErrorResponse
+    // never ran, no X-Audio-Error header was set, and the player
+    // showed a bare "Audio unavailable" with no diagnostic on the
+    // user's screen.
+    //
+    // The fix awaits `Promise.all(streamPromises)` so every chunk's
+    // response headers are confirmed before the Response is built.
+    // Body streaming still happens lazily, so time-to-first-audio is
+    // bounded by the slowest fetch's TTFB, not by full body download.
+    const src = await read("src/worker/integrations/tts/elevenlabs-adapter.ts");
+    expect(src).toMatch(/await Promise\.all\(streamPromises\)/);
+  });
 });
 
 describe("AudioPlayer: surfaces upstream error inline", () => {
