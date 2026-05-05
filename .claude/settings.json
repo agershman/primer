@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun run check 1>&2 || exit 2",
+            "if": "Bash(git push *)",
+            "timeout": 180,
+            "statusMessage": "Running bun run check before push…"
+          }
+        ]
+      }
+    ]
+  }
+}
