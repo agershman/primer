@@ -22,6 +22,7 @@ function contentToPlainText(content: ContentBlock[]): string {
     .map((b) => {
       return b.value
         .replace(/\{\{(.+?)\|\|.+?\}\}/g, "$1")
+        .replace(/\[\[(.+?)\|\|.+?\]\]/g, "$1")
         .replace(/\*\*(.+?)\*\*/g, "$1")
         .replace(/\*(.+?)\*/g, "$1")
         .replace(/`([^`]+)`/g, "$1");

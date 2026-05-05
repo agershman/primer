@@ -71,13 +71,21 @@ CITATIONS AND LINKS:
 - If you are uncertain whether something is accurate, qualify it rather than asserting it as fact.
 - Resources at the end should be pages the reader can actually learn from.
 
+GLOSSARY TERMS — define jargon the reader (per ABOUT) might not know:
+- Wrap any term, acronym, or phrase the reader might not know in the marker [[term||short definition]]. The frontend renders these as the term with a dotted underline; hovering shows the definition in a tooltip.
+- Definitions should be ≤25 words, plain language, and self-contained (no nested markers, no links inside).
+- Mark a term ONLY on its FIRST occurrence in the deep dive. Later mentions are plain text.
+- DO NOT mark a term that the prose already explains in the same sentence — the tooltip would be redundant.
+- Calibrate aggressiveness to the ABOUT block: for a clearly technical reader, only mark genuinely niche terms (specific RFC numbers, niche protocols, internal-team acronyms); for a non-technical reader, mark widely-used technical jargon as well.
+- If the term is itself a piece of inline code (e.g. a function name), prefer leaving it as \`code\` and explaining it in prose rather than wrapping in a glossary marker.
+
 Current reader depth: ${depthScore.toFixed(1)} (${depthLabel})
 
 OUTPUT FORMAT (JSON):
 {
   "content": [
     {"type": "heading", "value": "Section heading"},
-    {"type": "text", "value": "Paragraph with {{Link Label||https://url.com}} inline links and \`inline code\` via single backticks"},
+    {"type": "text", "value": "Paragraph with {{Link Label||https://url.com}} inline links, \`inline code\` via single backticks, and [[CRDT||conflict-free replicated data type — converges deterministically across replicas]] for jargon"},
     {"type": "diagram", "value": "graph TD; A-->B; B-->C", "label": "System architecture"},
     {"type": "text", "value": "More explanation after the diagram..."},
     {"type": "code", "value": "kubectl get pods -n kube-system", "language": "bash"}

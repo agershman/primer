@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { dispatchPrimerEvent, onPrimerEvent } from "../lib/events";
 import type { ContentBlock } from "../types";
+import { Tooltip } from "./Tooltip";
 
 interface RichTextProps {
   blocks: ContentBlock[];
@@ -17,6 +18,11 @@ function parseInlineMarkup(text: string): ReactNode[] {
 
   while (remaining.length > 0) {
     const linkMatch = remaining.match(/\{\{(.+?)\|\|(.+?)\}\}/);
+    // Glossary marker `[[term||definition]]` — surfaces a hover tooltip
+    // with the definition. Term and definition are split on `||` exactly
+    // like the link syntax so the LLM can reuse the same mental model.
+    // Non-greedy on the inner halves so adjacent markers don't merge.
+    const glossaryMatch = remaining.match(/\[\[(.+?)\|\|(.+?)\]\]/);
     const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
     const italicMatch = remaining.match(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/);
     const codeMatch = remaining.match(/`([^`]+)`/);
@@ -77,6 +83,26 @@ function parseInlineMarkup(text: string): ReactNode[] {
           >
             {codeMatch[1]}
           </code>
+        ),
+      });
+    }
+
+    if (glossaryMatch?.index !== undefined) {
+      // Dotted underline + help cursor signals "more info on hover"
+      // without competing with link styling (links use a solid border
+      // in the accent color). The Tooltip portal handles touch via
+      // its existing onMouseEnter / onMouseLeave handlers — long-press
+      // on iOS triggers the same hover state.
+      candidates.push({
+        index: glossaryMatch.index,
+        length: glossaryMatch[0].length,
+        type: "glossary",
+        node: (
+          <Tooltip key={key++} content={glossaryMatch[2]}>
+            <span className="border-b border-dotted border-text-faint cursor-help text-text-primary">
+              {glossaryMatch[1]}
+            </span>
+          </Tooltip>
         ),
       });
     }
