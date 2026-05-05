@@ -75,6 +75,7 @@ import {
 import { extractConcepts } from "./concept-extractor.js";
 import { type ClassificationResult, classifyDraft, findCandidatePredecessors } from "./continuation-classifier.js";
 import { runDecayJob } from "./depth-manager.js";
+import { type FocusScorerCandidate, scoreCandidatesAgainstFocus } from "./focus-scorer.js";
 import { generateQuiz } from "./quiz-assessor.js";
 import { filterSlackByRelevance } from "./slack-relevance-filter.js";
 import { generateTeachingPiece } from "./teaching-generator.js";
@@ -187,6 +188,7 @@ export async function generateDailyBriefing(
     const teachingPieceSpec = resolveModel(surfaceMap, "teachingPiece");
     const quizGenerationSpec = resolveModel(surfaceMap, "quizGeneration");
     const continuationSpec = resolveModel(surfaceMap, "continuationClassifier");
+    const focusScoringSpec = resolveModel(surfaceMap, "focusScoring");
     // Persisted on the briefing row for analytics. Stored as a flat
     // `<operation>: <model>` map for backwards compatibility with older
     // briefings; PR 2 will widen this to capture provider + reasoning.
@@ -196,6 +198,7 @@ export async function generateDailyBriefing(
       teachingPiece: teachingPieceSpec.model,
       quizGeneration: quizGenerationSpec.model,
       continuationClassifier: continuationSpec.model,
+      focusScoring: focusScoringSpec.model,
     };
 
     await updateProgress(db, briefingId, "work_context", "Fetching work context…");
@@ -385,6 +388,32 @@ export async function generateDailyBriefing(
     const allConcepts = await getAllConcepts(db, userId);
     const activeConcepts = await getActiveConcepts(db, userId);
 
+    // Refresh detection: if the briefing already has teaching pieces,
+    // we're refreshing in ADDITIVE mode — preserve existing pieces and
+    // append new ones shaped by the current focus, instead of writing
+    // a full fresh set. The lifecycle handler resets the briefing's
+    // status from done/failed back to generating; pieces survive that
+    // transition and signal additivity here.
+    const existingPiecesRows = await db
+      .prepare(`SELECT id, position, concepts FROM teaching_pieces WHERE briefing_id = ? AND user_id = ?`)
+      .bind(briefingId, userId)
+      .all<{ id: string; position: number; concepts: string }>();
+    const existingPieces = existingPiecesRows.results ?? [];
+    const isAdditiveRefresh = existingPieces.length > 0;
+    const existingPieceConceptIds = new Set<string>();
+    let maxExistingPosition = -1;
+    for (const row of existingPieces) {
+      if (row.position > maxExistingPosition) maxExistingPosition = row.position;
+      try {
+        const ids = JSON.parse(row.concepts) as string[];
+        for (const id of ids) existingPieceConceptIds.add(id);
+      } catch {
+        // Tolerate a malformed concepts blob — it just means we won't
+        // dedupe against this row's concept ids. Worst case the refresh
+        // re-teaches a concept; it won't crash generation.
+      }
+    }
+
     // Run decay
     await runDecayJob(db, userId);
 
@@ -558,9 +587,12 @@ export async function generateDailyBriefing(
 
     const candidates: TeachingTarget[] = [];
 
-    // P1: Low-depth concepts from active work
+    // P1: Low-depth concepts from active work. On an additive refresh,
+    // skip concepts that already have a piece on this briefing — the
+    // whole point of preserving existing pieces is that we don't
+    // re-teach what's already there.
     const activeWorkConcepts = activeConcepts
-      .filter((c) => !recentSet.has(c.id) && (c.depth_score ?? 0) < 3)
+      .filter((c) => !recentSet.has(c.id) && (c.depth_score ?? 0) < 3 && !existingPieceConceptIds.has(c.id))
       .sort((a, b) => (a.depth_score ?? 0) - (b.depth_score ?? 0));
 
     for (const concept of activeWorkConcepts) {
@@ -577,11 +609,16 @@ export async function generateDailyBriefing(
       });
     }
 
-    // P2: Adjacent external
+    // P2: Adjacent external. Adjacent candidates whose matched concept
+    // is already covered get filtered out on the additive path; an
+    // adjacent without a matched concept still has no concept-id
+    // dedupe key, so it passes through (acceptable — the article URL
+    // dedupe is handled separately at insert time).
     for (const adj of adjacentStep.data.relevant.slice(0, 3)) {
       const matchedConcept = allConcepts.find((c) =>
         adj.relevanceConcepts.some((rc) => rc.toLowerCase() === c.canonical_name),
       );
+      if (matchedConcept && existingPieceConceptIds.has(matchedConcept.id)) continue;
       candidates.push({
         conceptName: adj.relevanceConcepts[0] ?? adj.title,
         conceptId: matchedConcept?.id ?? "",
@@ -602,9 +639,9 @@ export async function generateDailyBriefing(
       });
     }
 
-    // P4: Decayed concepts
+    // P4: Decayed concepts. Same additive-refresh dedupe as above.
     const decayedConcepts = allConcepts
-      .filter((c) => c.decay_warned_at && !recentSet.has(c.id))
+      .filter((c) => c.decay_warned_at && !recentSet.has(c.id) && !existingPieceConceptIds.has(c.id))
       .sort((a, b) => (a.depth_score ?? 0) - (b.depth_score ?? 0));
 
     for (const concept of decayedConcepts.slice(0, 2)) {
@@ -625,17 +662,63 @@ export async function generateDailyBriefing(
       });
     }
 
-    // Apply selection constraints
+    // Score candidates against the user's current focus statement so
+    // the focus actually steers selection — not just extraction. One
+    // LLM call covers all candidates in this briefing. Skipped entirely
+    // when the user has no focus set, in which case the sort below
+    // falls back to the historical priority + depth ordering.
+    //
+    // Use the candidate's `conceptId` when present; for adjacent items
+    // without a matched concept, fall back to a synthetic key built
+    // from the candidate's array index so we can still re-rank them.
+    let focusScores = new Map<string, number>();
+    if (focusStatement && focusStatement.trim().length > 0 && candidates.length > 0) {
+      const scorerInputs: FocusScorerCandidate[] = candidates.map((c, i) => ({
+        id: c.conceptId || `__cand_${i}__`,
+        name: c.conceptName,
+        category: c.category,
+        context: c.selectionReasoning,
+      }));
+      focusScores = await scoreCandidatesAgainstFocus(db, userId, llm, focusStatement, scorerInputs, focusScoringSpec);
+    }
+    const focusScoreFor = (c: TeachingTarget, i: number): number => {
+      const key = c.conceptId || `__cand_${i}__`;
+      // Missing scores default to 0.5 (neutral) so unscored candidates
+      // don't get penalized to the bottom of their priority tier when
+      // the LLM returns a partial response.
+      return focusScores.get(key) ?? 0.5;
+    };
+
+    // Apply selection constraints. On the additive-refresh path the
+    // cap shrinks to MAX_REFRESH_ADDITIONS so a chain of refreshes
+    // doesn't grow a briefing without bound, and the
+    // "must include 1 current-work piece" / MIN_PIECES invariants are
+    // already satisfied by the preserved pieces — we don't re-enforce
+    // them.
+    const maxNewPieces = isAdditiveRefresh ? BRIEFING_RULES.MAX_REFRESH_ADDITIONS : BRIEFING_RULES.MAX_PIECES;
     const selected: TeachingTarget[] = [];
     const usedConceptIds = new Set<string>();
     let adjacentCount = 0;
     let decayCount = 0;
     let hasCurrentWork = false;
 
-    const sorted = candidates.sort((a, b) => a.priority - b.priority);
+    // Sort by priority tier first (preserves P1/P2/P4 + min-current-work
+    // invariants), then within each tier by focus relevance descending,
+    // then by depth ascending (teach the weakest concept first). With
+    // no focus statement, focusScoreFor returns 0.5 uniformly so this
+    // collapses to today's priority + depth ordering.
+    const indexed = candidates.map((c, i) => ({ c, i }));
+    indexed.sort((a, b) => {
+      if (a.c.priority !== b.c.priority) return a.c.priority - b.c.priority;
+      const fa = focusScoreFor(a.c, a.i);
+      const fb = focusScoreFor(b.c, b.i);
+      if (fa !== fb) return fb - fa;
+      return (a.c.depthScore ?? 0) - (b.c.depthScore ?? 0);
+    });
+    const sorted = indexed.map((x) => x.c);
 
     for (const candidate of sorted) {
-      if (selected.length >= BRIEFING_RULES.MAX_PIECES) break;
+      if (selected.length >= maxNewPieces) break;
       if (candidate.conceptId && usedConceptIds.has(candidate.conceptId)) continue;
 
       if (candidate.sourceType === "adjacent") {
@@ -654,11 +737,15 @@ export async function generateDailyBriefing(
       if (candidate.conceptId) usedConceptIds.add(candidate.conceptId);
     }
 
-    // Ensure at least 1 from current work
-    if (!hasCurrentWork && selected.length > 0 && activeWorkConcepts.length > 0) {
+    // Ensure at least 1 from current work — only on a fresh
+    // generation. On an additive refresh the existing pieces already
+    // satisfy this invariant, and the user explicitly wants the new
+    // pieces to follow their current focus signal regardless of
+    // source type.
+    if (!isAdditiveRefresh && !hasCurrentWork && selected.length > 0 && activeWorkConcepts.length > 0) {
       const fallback = activeWorkConcepts.find((c) => !usedConceptIds.has(c.id));
       if (fallback) {
-        if (selected.length >= BRIEFING_RULES.MAX_PIECES) selected.pop();
+        if (selected.length >= maxNewPieces) selected.pop();
         const fallbackCtx = findRelatedWorkItems(fallback.canonical_name);
         selected.push({
           conceptName: fallback.canonical_name,
@@ -673,12 +760,17 @@ export async function generateDailyBriefing(
       }
     }
 
-    // Ensure minimum
-    while (selected.length < BRIEFING_RULES.MIN_PIECES && candidates.length > selected.length) {
-      const next = sorted.find((c) => !selected.includes(c) && (!c.conceptId || !usedConceptIds.has(c.conceptId)));
-      if (!next) break;
-      selected.push(next);
-      if (next.conceptId) usedConceptIds.add(next.conceptId);
+    // Ensure minimum — only on a fresh generation. Additive refreshes
+    // can legitimately produce zero new pieces (nothing in the user's
+    // updated focus mapped to an uncovered concept), and that's fine
+    // — the existing briefing remains intact.
+    if (!isAdditiveRefresh) {
+      while (selected.length < BRIEFING_RULES.MIN_PIECES && candidates.length > selected.length) {
+        const next = sorted.find((c) => !selected.includes(c) && (!c.conceptId || !usedConceptIds.has(c.conceptId)));
+        if (!next) break;
+        selected.push(next);
+        if (next.conceptId) usedConceptIds.add(next.conceptId);
+      }
     }
 
     // Selecting is fast; record before kicking off generation.
@@ -695,8 +787,11 @@ export async function generateDailyBriefing(
     const piecesStart = Date.now();
     await updateProgress(db, briefingId, "generating_pieces", `Writing ${selected.length} teaching pieces…`);
 
-    // Step 7: Generate teaching pieces (2 at a time for speed)
-    let position = 0;
+    // Step 7: Generate teaching pieces (2 at a time for speed). On an
+    // additive refresh, new pieces append after the highest existing
+    // position so preserved pieces keep their order and new ones
+    // appear at the end.
+    let position = maxExistingPosition + 1;
     const pieceDetails: string[] = [];
     // Drafts the continuation classifier flagged as REDUNDANT — surfaced
     // to the briefing header as a "no new movement" chip so the user
@@ -740,6 +835,7 @@ export async function generateDailyBriefing(
               return generateTeachingPiece(db, userId, llm, target, {
                 modelSpec: teachingPieceSpec,
                 aboutStatement,
+                focusStatement,
               });
             },
             null,
@@ -874,6 +970,7 @@ export async function generateDailyBriefing(
               const continuationPiece = await generateTeachingPiece(db, userId, llm, target, {
                 modelSpec: teachingPieceSpec,
                 aboutStatement,
+                focusStatement,
                 continuation: {
                   predecessorTitle: pred.title,
                   predecessorDate: pred.briefingDate,
@@ -916,8 +1013,8 @@ export async function generateDailyBriefing(
               `INSERT INTO teaching_pieces
            (id, user_id, briefing_id, position, title, piece_type, source_type, source_reference,
             selection_reasoning, concepts, target_depth, content, read_time_minutes, model_used,
-            source_context, due_at, due_reason, series_id, part_number, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+            source_context, due_at, due_reason, series_id, part_number, focus_version_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
             )
             .bind(
               pieceId,
@@ -939,6 +1036,7 @@ export async function generateDailyBriefing(
               pieceDueReason,
               seriesId,
               partNumber,
+              focusVersionId,
             )
             .run();
 
@@ -985,8 +1083,14 @@ export async function generateDailyBriefing(
     stepStart = Date.now();
     await updateProgress(db, briefingId, "quiz", "Generating calibration quiz...");
 
-    // Step 8: Generate calibration quiz for lowest-depth concept
-    const lowestDepthTarget = selected.filter((t) => t.conceptId).sort((a, b) => a.depthScore - b.depthScore)[0];
+    // Step 8: Generate calibration quiz for lowest-depth concept.
+    // Skipped on additive refreshes — the briefing already has its
+    // calibration quiz from the original generation, which still
+    // points at a preserved teaching piece. Layering a second quiz
+    // on top would be confusing noise.
+    const lowestDepthTarget = isAdditiveRefresh
+      ? undefined
+      : selected.filter((t) => t.conceptId).sort((a, b) => a.depthScore - b.depthScore)[0];
 
     if (lowestDepthTarget?.conceptId) {
       const quizStep = await safeStep(
@@ -995,6 +1099,7 @@ export async function generateDailyBriefing(
           return generateQuiz(db, userId, llm, lowestDepthTarget.conceptName, lowestDepthTarget.depthScore, {
             modelSpec: quizGenerationSpec,
             aboutStatement,
+            focusStatement,
           });
         },
         null,

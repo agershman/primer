@@ -65,6 +65,14 @@ export const BRIEFING_RULES = {
   MAX_ADJACENT_PIECES: 1,
   MAX_DECAY_PIECES: 1,
   NO_REPEAT_WITHIN_DAYS: 5,
+  // Cap on how many *additional* teaching pieces a same-day refresh
+  // appends to an already-generated briefing. Existing pieces are
+  // preserved (a focus-statement edit shouldn't retroactively wipe
+  // earlier pieces just because the user changed direction); the
+  // refresh adds up to this many new pieces shaped by the current
+  // focus. Kept small so a chain of refreshes can't grow a briefing
+  // without bound.
+  MAX_REFRESH_ADDITIONS: 2,
 } as const;
 
 export const RETRY_CONFIG = {

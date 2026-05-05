@@ -525,6 +525,19 @@ describe("About wired into all user-facing AI surfaces", () => {
     expect(src).toMatch(/generateTeachingPiece[\s\S]{0,200}aboutStatement/);
     expect(src).toMatch(/generateQuiz[\s\S]{0,200}aboutStatement/);
     expect(src).toMatch(/scanAdjacentSources[\s\S]{0,400}aboutStatement/);
+    // Focus is now also threaded into teaching + quiz so it can
+    // shape prose / question framing, not just selection.
+    expect(src).toMatch(/generateTeachingPiece[\s\S]{0,200}focusStatement/);
+    expect(src).toMatch(/generateQuiz[\s\S]{0,200}focusStatement/);
+  });
+
+  it("teaching-generator accepts focusStatement and emits a CURRENT FOCUS steering block", async () => {
+    const src = await read("src/worker/services/teaching-generator.ts");
+    expect(src).toContain("focusStatement?: string | null");
+    expect(src).toContain("CURRENT FOCUS");
+    // Frame focus as direction, not voice — and never let the LLM
+    // quote it back at the reader.
+    expect(src).toContain("Never quote it back");
   });
 
   it("quiz-assessor generateQuiz accepts aboutStatement and includes calibration block", async () => {
@@ -533,6 +546,42 @@ describe("About wired into all user-facing AI surfaces", () => {
     expect(src).toContain("aboutStatement?: string | null");
     expect(src).toContain("ABOUT THE READER");
   });
+
+  it("quiz-assessor generateQuiz accepts focusStatement and emits a CURRENT FOCUS framing block", async () => {
+    const src = await read("src/worker/services/quiz-assessor.ts");
+    expect(src).toContain("focusStatement?: string | null");
+    expect(src).toContain("CURRENT FOCUS");
+  });
+
+  it("focus-scorer service exists with the expected shape — single LLM call, fail-open", async () => {
+    const src = await read("src/worker/services/focus-scorer.ts");
+    expect(src).toContain("scoreCandidatesAgainstFocus");
+    expect(src).toContain("FocusScorerCandidate");
+    // Records token usage under a distinct step key so the analytics
+    // waterfall can attribute the call.
+    expect(src).toContain('"focus_scoring"');
+    // Fails open — an LLM/parse error returns an empty Map and logs,
+    // never throws. The caller's downstream sort still works.
+    expect(src).toMatch(/return new Map\(\)/);
+  });
+
+  it("focusScoring is registered in the model catalog with a default", async () => {
+    const src = await read("src/worker/config/models.ts");
+    expect(src).toContain('"focusScoring"');
+    expect(src).toContain("focusScoring:");
+  });
+
+  it("briefing-generator integrates the focus scorer into teaching-target ranking", async () => {
+    const src = await read("src/worker/services/briefing-generator.ts");
+    expect(src).toContain("scoreCandidatesAgainstFocus");
+    expect(src).toContain("focusScoringSpec");
+    // The new sort uses focus relevance as a secondary key after
+    // priority, then depth ascending. We pin the structural
+    // signature so future changes to the comparator are intentional.
+    expect(src).toMatch(/if \(a\.c\.priority !== b\.c\.priority\)/);
+    expect(src).toMatch(/focusScoreFor/);
+  });
+
 
   it("adjacent-scanner accepts aboutStatement and focusStatement and uses them for scoring nuance", async () => {
     const src = await read("src/worker/services/adjacent-scanner.ts");
