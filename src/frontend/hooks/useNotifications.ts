@@ -52,6 +52,8 @@ export interface UseNotificationsResult {
   acknowledge: (id: string) => Promise<void>;
   acknowledgeAll: () => Promise<void>;
   dismiss: (id: string) => Promise<void>;
+  /** Bulk-dismiss every bell row (ready/failed); leaves in-progress rows alone. */
+  dismissAll: () => Promise<void>;
 }
 
 export function useNotifications(): UseNotificationsResult {
@@ -161,6 +163,20 @@ export function useNotifications(): UseNotificationsResult {
     [fetchOnce],
   );
 
+  const dismissAll = useCallback(async () => {
+    // Optimistic — drop bell rows locally so the panel empties the
+    // moment the user clicks "Clear all". In-progress rows stay
+    // (the ActivityIndicator owns those).
+    setNotifications((prev) => prev.filter((n) => n.status === "in_progress"));
+    setUnread(0);
+    try {
+      await apiPost("/api/notifications/dismiss-all");
+    } catch {
+      /* swallow; next poll will reconcile */
+    }
+    await fetchOnce();
+  }, [fetchOnce]);
+
   return {
     notifications,
     unreadCount,
@@ -170,5 +186,6 @@ export function useNotifications(): UseNotificationsResult {
     acknowledge,
     acknowledgeAll,
     dismiss,
+    dismissAll,
   };
 }

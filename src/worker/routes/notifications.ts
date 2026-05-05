@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import {
   acknowledgeAllNotifications,
   acknowledgeNotification,
+  dismissAllNotifications,
   dismissNotification,
   listActiveNotifications,
 } from "../db/notifications-queries.js";
@@ -59,4 +60,10 @@ notificationRoutes.post("/notifications/:id/dismiss", async (c) => {
   const id = c.req.param("id");
   const ok = await dismissNotification(c.env.DB, user.userId, id);
   return c.json({ ok });
+});
+
+notificationRoutes.post("/notifications/dismiss-all", async (c) => {
+  const user = c.get("user");
+  const changed = await dismissAllNotifications(c.env.DB, user.userId);
+  return c.json({ ok: true, changed });
 });

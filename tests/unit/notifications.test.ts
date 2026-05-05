@@ -42,7 +42,15 @@ describe("notifications queries", () => {
     expect(src).toContain("export async function acknowledgeNotification");
     expect(src).toContain("export async function acknowledgeAllNotifications");
     expect(src).toContain("export async function dismissNotification");
+    expect(src).toContain("export async function dismissAllNotifications");
     expect(src).toContain("export async function reapStuckNotifications");
+  });
+
+  it("dismissAllNotifications skips in_progress rows so it can't kill in-flight work", async () => {
+    const src = await read("src/worker/db/notifications-queries.ts");
+    // Only ready/failed rows get cleared; in_progress is owned by
+    // ActivityIndicator and a bell "Clear all" must not touch it.
+    expect(src).toMatch(/dismissAllNotifications[\s\S]{0,400}status IN \('ready', 'failed'\)/);
   });
 
   it("listActiveNotifications excludes dismissed rows and orders newest first", async () => {
@@ -60,12 +68,13 @@ describe("notifications queries", () => {
 });
 
 describe("notifications routes", () => {
-  it("exposes list / acknowledge / acknowledge-all / dismiss handlers", async () => {
+  it("exposes list / acknowledge / acknowledge-all / dismiss / dismiss-all handlers", async () => {
     const src = await read("src/worker/routes/notifications.ts");
     expect(src).toMatch(/notificationRoutes\.get\("\/notifications"/);
     expect(src).toMatch(/notificationRoutes\.post\("\/notifications\/:id\/acknowledge"/);
     expect(src).toMatch(/notificationRoutes\.post\("\/notifications\/acknowledge-all"/);
     expect(src).toMatch(/notificationRoutes\.post\("\/notifications\/:id\/dismiss"/);
+    expect(src).toMatch(/notificationRoutes\.post\("\/notifications\/dismiss-all"/);
   });
 
   it("list response includes unreadCount and inProgressCount aggregates", async () => {
@@ -136,6 +145,7 @@ describe("frontend bell + hook", () => {
     expect(src).toContain('`/api/notifications/${id}/acknowledge`');
     expect(src).toContain('`/api/notifications/${id}/dismiss`');
     expect(src).toContain('"/api/notifications/acknowledge-all"');
+    expect(src).toContain('"/api/notifications/dismiss-all"');
   });
 
   it("NotificationBell renders unread badge + dropdown with dismiss + click-through (no in_progress signaling)", async () => {
@@ -156,19 +166,23 @@ describe("frontend bell + hook", () => {
     expect(src).toMatch(/n\.status === "ready"[\s\S]{0,200}n\.actionUrl/);
     // Acknowledge-all fires the moment the dropdown opens with unread
     // — the badge clears, but rows remain visible until dismissed.
-    expect(src).toMatch(/if \(open\)[\s\S]{0,200}unreadCount > 0[\s\S]{0,200}acknowledgeAll/);
+    expect(src).toMatch(/open && unreadCount > 0[\s\S]{0,200}acknowledgeAll/);
     // Per-row dismiss button.
     expect(src).toContain("onDismiss");
   });
 
-  it("NotificationBell exposes a 'Mark all as read' button when unread > 0", async () => {
+  it("NotificationBell exposes a 'Clear all' button that empties the bell list", async () => {
     const src = await read("src/frontend/components/NotificationBell.tsx");
-    // Keyboard- and screen-reader-friendly affordance for clearing the
-    // unread count without scrolling through each row. Rendered only
-    // when `unreadCount > 0` so it doesn't confuse the empty / fully-
-    // read state.
+    // The bulk version of per-row dismiss. Visibility gate is
+    // `bellNotifications.length > 0` (not `unreadCount > 0`) because
+    // the open-on-focus auto-ack flips unread to 0 the moment the
+    // panel paints — a stricter gate hides the button before the
+    // user can see it. Action is `dismissAll`, not `acknowledgeAll`,
+    // because the previous "Mark all as read" only flipped ack state
+    // and left the rows visible with no way to bulk-clear them. Pin
+    // both so a future refactor doesn't regress either half.
     expect(src).toMatch(
-      /unreadCount > 0[\s\S]{0,500}onClick[\s\S]{0,200}acknowledgeAll[\s\S]{0,400}Mark all as read/,
+      /bellNotifications\.length > 0[\s\S]{0,500}onClick[\s\S]{0,200}dismissAll[\s\S]{0,400}Clear all/,
     );
   });
 

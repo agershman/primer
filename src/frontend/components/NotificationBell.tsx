@@ -26,23 +26,20 @@ import { type AppNotification, useNotifications } from "../hooks/useNotification
  * new bell-relevant kinds (briefing_ready, quiz_due, …) plug in
  * without UI changes.
  *
- * The dropdown also includes a "Mark all as read" button up top
- * for users who want to clear the unread count without reading
- * each row — opening the dropdown auto-acknowledges visible
- * unread rows after a beat, but the explicit button is a
- * keyboard- and screen-reader-friendly affordance.
+ * The dropdown also includes a "Clear all" button whenever there
+ * are bell rows. Opening the dropdown auto-acknowledges unread
+ * rows (so the badge clears), but the explicit button is the only
+ * way to bulk-empty the panel — earlier this said "Mark all as
+ * read" and only flipped acknowledgement state, which left the rows
+ * sitting there read-but-still-visible with no obvious way to
+ * clear them short of dismissing each one individually. The button
+ * now actually empties the bell list (in-progress rows stay,
+ * because they belong to the ActivityIndicator).
  */
 export function NotificationBell() {
-  const { notifications, unreadCount, refresh, acknowledge, acknowledgeAll, dismiss } = useNotifications();
+  const { notifications, unreadCount, refresh, acknowledge, acknowledgeAll, dismiss, dismissAll } =
+    useNotifications();
   const [open, setOpen] = useState(false);
-  // Snapshot of whether the panel had unread rows when it opened.
-  // The auto-ack effect below races the "Mark all as read" button's
-  // visibility gate — by the time the panel paints we've already
-  // flipped unreadCount to 0, so a naive `unreadCount > 0` check
-  // hides the button immediately. We keep this true for the lifetime
-  // of the open panel so the button stays visible (and serves as the
-  // "fresh after click" affordance described above).
-  const [hadUnreadOnOpen, setHadUnreadOnOpen] = useState(false);
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -52,20 +49,16 @@ export function NotificationBell() {
   // (newest-first) so we don't have to re-sort.
   const bellNotifications = useMemo(() => notifications.filter((n) => n.status !== "in_progress"), [notifications]);
 
-  // Acknowledge everything visible the moment the dropdown opens.
+  // Acknowledge everything visible the moment the dropdown opens
+  // (and again if a new unread row lands while it's still open).
   // The unread badge is for "you have something new"; once the user
   // has the panel in front of them, that's by definition no longer
   // true. We still show the rows; we just clear the unread count.
   useEffect(() => {
-    if (open) {
-      if (unreadCount > 0 && !hadUnreadOnOpen) {
-        setHadUnreadOnOpen(true);
-        void acknowledgeAll();
-      }
-    } else if (hadUnreadOnOpen) {
-      setHadUnreadOnOpen(false);
+    if (open && unreadCount > 0) {
+      void acknowledgeAll();
     }
-  }, [open, unreadCount, hadUnreadOnOpen, acknowledgeAll]);
+  }, [open, unreadCount, acknowledgeAll]);
 
   // Refresh the list once on open so a freshly-completed notification
   // shows up even if it landed between polls.
@@ -149,24 +142,24 @@ export function NotificationBell() {
             <span className="text-xs font-semibold text-text-primary">Notifications</span>
             <div className="flex items-center gap-3">
               {/*
-               * Mark all as read is a keyboard + a11y affordance for
-               * users who don't want to scroll through and click each
-               * unread row. We render it only when there's at least
-               * one unread to avoid "this button does nothing" UX.
-               * Open-on-focus already auto-ack's, so this is mostly
-               * a no-op for mouse users — but the button doubles as
-               * a clear visual signal that the panel is "fresh"
-               * after a click.
+               * "Clear all" empties the bell list in one click — the
+               * bulk version of the per-row dismiss button. Shown
+               * whenever there are bell rows; the action is a no-op
+               * when the list is empty so we just hide it then. The
+               * earlier label was "Mark all as read", but that only
+               * flipped acknowledgement state — the rows stayed
+               * visible and the user had no way to bulk-empty the
+               * panel. The new label matches the new behavior.
                */}
-              {(unreadCount > 0 || hadUnreadOnOpen) && (
+              {bellNotifications.length > 0 && (
                 <button
                   type="button"
                   onClick={() => {
-                    void acknowledgeAll();
+                    void dismissAll();
                   }}
                   className="text-[10px] font-mono text-accent hover:text-text-primary transition-colors"
                 >
-                  Mark all as read
+                  Clear all
                 </button>
               )}
               <span className="text-[10px] font-mono text-text-dim">

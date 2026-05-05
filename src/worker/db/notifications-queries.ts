@@ -225,6 +225,24 @@ export async function dismissNotification(db: D1Database, userId: string, id: st
 }
 
 /**
+ * Bulk-dismiss every bell-relevant row (status ready/failed). The
+ * `in_progress` rows are intentionally excluded because they're
+ * owned by the ActivityIndicator surface, not the bell — a user
+ * "clearing" the bell shouldn't accidentally kill the live state of
+ * an in-flight deep dive.
+ */
+export async function dismissAllNotifications(db: D1Database, userId: string): Promise<number> {
+  const result = await db
+    .prepare(
+      `UPDATE notifications SET status = 'dismissed', updated_at = datetime('now')
+       WHERE user_id = ? AND status IN ('ready', 'failed')`,
+    )
+    .bind(userId)
+    .run();
+  return result.meta?.changes ?? 0;
+}
+
+/**
  * Stuck-row detection. Mirrors the briefing pipeline's zombie
  * detection: a notification stuck in `in_progress` for too long is
  * almost certainly a worker that died mid-flight (Cloudflare
