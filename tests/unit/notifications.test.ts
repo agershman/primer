@@ -156,7 +156,7 @@ describe("frontend bell + hook", () => {
     expect(src).toMatch(/n\.status === "ready"[\s\S]{0,200}n\.actionUrl/);
     // Acknowledge-all fires the moment the dropdown opens with unread
     // — the badge clears, but rows remain visible until dismissed.
-    expect(src).toMatch(/open && unreadCount > 0[\s\S]{0,200}acknowledgeAll/);
+    expect(src).toMatch(/if \(open\)[\s\S]{0,200}unreadCount > 0[\s\S]{0,200}acknowledgeAll/);
     // Per-row dismiss button.
     expect(src).toContain("onDismiss");
   });
