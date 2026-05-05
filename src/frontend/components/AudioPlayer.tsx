@@ -94,6 +94,7 @@ export function AudioPlayer({
   const src = voiceId ? `${srcBase}${srcBase.includes("?") ? "&" : "?"}voice=${encodeURIComponent(voiceId)}` : srcBase;
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
+  const errorPopoverRef = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "playing" | "paused" | "error">("idle");
   // Diagnostic message shown in the error state. Populated by the
   // helper below on `<audio>.error` — fetches the same URL via
@@ -102,6 +103,12 @@ export function AudioPlayer({
   // unavailable" with no clue whether their API key is wrong, the
   // voice id is invalid, or ElevenLabs is rate-limiting.
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  // Whether the click-toggleable error popover is open. Inline in the
+  // narrow player row a long upstream message would either truncate
+  // or push other controls off-screen, so we collapse it to an info
+  // icon next to "Audio unavailable" and surface the full detail in
+  // a floating panel above the icon on click.
+  const [errorOpen, setErrorOpen] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   // While the real `audio.duration` is `Infinity` (streaming TTS, no
@@ -333,8 +340,34 @@ export function AudioPlayer({
       setEstimatedDuration(0);
       setScrubPct(null);
       setErrorDetail(null);
+      setErrorOpen(false);
     }
   }, [src]);
+
+  // Close the error popover on outside click + Escape. Standard
+  // dismissal affordances — without these, a user who clicked the
+  // info icon to peek at the upstream message has no obvious way
+  // to put it back, especially on mobile where there's no Escape
+  // key. We only attach when the popover is open so the listeners
+  // aren't paying for themselves on every player on the page.
+  useEffect(() => {
+    if (!errorOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target;
+      if (errorPopoverRef.current && target instanceof Node && !errorPopoverRef.current.contains(target)) {
+        setErrorOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setErrorOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [errorOpen]);
 
   // ─── Scrubbing helpers ───────────────────────────────────────────────
 
@@ -715,14 +748,62 @@ export function AudioPlayer({
       )}
 
       {state === "error" && (
-        <span className="font-ui text-[10px] text-negative" title={errorDetail ?? undefined}>
-          Audio unavailable
-          {errorDetail ? (
-            <>
-              : <span className="font-mono">{errorDetail}</span>
-            </>
-          ) : null}
-        </span>
+        <div ref={errorPopoverRef} className="relative shrink-0">
+          {/*
+            Trigger — "Audio unavailable" with a small info circle to
+            signal the popover affordance. Inline mono-text detail
+            from the previous design got truncated in narrow chat
+            bubbles and was easy to miss; the icon + click pattern
+            keeps the row uncluttered while making the detail
+            discoverable. `aria-haspopup` + `aria-expanded` mark this
+            as a popover trigger for assistive tech.
+          */}
+          <button
+            type="button"
+            onClick={() => setErrorOpen((v) => !v)}
+            className="inline-flex items-center gap-1 font-ui text-[10px] text-negative hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-negative rounded"
+            aria-haspopup="dialog"
+            aria-expanded={errorOpen}
+            title="Show error details"
+          >
+            <span>Audio unavailable</span>
+            <InfoCircleIcon />
+          </button>
+          {errorOpen && (
+            <div
+              role="dialog"
+              aria-label="Audio playback error details"
+              className="absolute right-0 bottom-full mb-2 z-30 w-72 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-surface p-3 shadow-lg"
+            >
+              <div className="font-ui text-xs font-semibold text-text-primary mb-1.5">Couldn't play audio</div>
+              {errorDetail ? (
+                <div className="font-mono text-[10px] text-text-secondary whitespace-pre-wrap break-words leading-snug max-h-40 overflow-y-auto">
+                  {errorDetail}
+                </div>
+              ) : (
+                /*
+                  Fallback when the diagnostic fetch couldn't recover
+                  an upstream message. This usually means the audio
+                  request errored before a worker response was built
+                  (network failure, browser audio decode error on a
+                  cached partial response, etc.) — common-cause
+                  troubleshooting copy is the most useful thing we
+                  can show.
+                */
+                <div className="font-ui text-[11px] text-text-secondary leading-snug space-y-1.5">
+                  <p>The audio service didn't return a clear error.</p>
+                  <p>Common causes:</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-text-dim">
+                    <li>Provider API key missing or invalid</li>
+                    <li>Voice not enabled on your provider account</li>
+                    <li>Provider rate limit or concurrency cap</li>
+                  </ul>
+                  <p className="text-text-dim">Try a different voice in Settings, or retry in a moment.</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -743,6 +824,26 @@ function ListenIcon() {
       <path d="M3 5v6l4 3V2L3 5z" />
       <path d="M10 5.5a3 3 0 010 5" />
       <path d="M12 3.5a6 6 0 010 9" />
+    </svg>
+  );
+}
+
+function InfoCircleIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M8 7.25v3.5" />
+      <circle cx="8" cy="5" r="0.75" fill="currentColor" stroke="none" />
     </svg>
   );
 }
