@@ -205,18 +205,34 @@ export function DictationButton({
     // firing during long stretches of silence (the original bug).
     // We only bump on actual speech events (`onresult`).
 
+    // Some mobile browsers (notably Android Chrome with
+    // `continuous: true` + `interimResults: true`) re-emit
+    // already-finalized results in subsequent `onresult` events, often
+    // with `event.resultIndex` reset to 0 rather than advancing past
+    // the previously-emitted entries. Trusting `resultIndex` alone
+    // produces the textarea-fills-with-duplicates bug:
+    //   "Cinders Cinders Cinders concept Cinders concept Cinders
+    //   concept or Cinders concept or implementation ..."
+    // To stay correct on misbehaving browsers without regressing on
+    // spec-compliant ones, we walk every result from 0 and remember
+    // the highest index we've already emitted as final. The closure
+    // lives on this recognizer instance, so it resets on every
+    // auto-restart, which is what we want — each restart's results
+    // are an independent stream.
+    let lastEmittedFinalIndex = -1;
+
     recognition.onresult = (event: SpeechRecognitionResultEvent) => {
       bumpIdleTimer();
-      // Walk results from the resultIndex forward — this is what the spec
-      // gives us when continuous=true, so we don't double-process previous
-      // results that have already been finalized in earlier callbacks.
       let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
         const transcript = result[0]?.transcript ?? "";
         if (!transcript) continue;
         if (result.isFinal) {
-          onTranscriptRef.current?.(transcript);
+          if (i > lastEmittedFinalIndex) {
+            onTranscriptRef.current?.(transcript);
+            lastEmittedFinalIndex = i;
+          }
         } else {
           interim += (interim ? " " : "") + transcript;
         }
