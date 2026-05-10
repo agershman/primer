@@ -51,7 +51,7 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     const cron = event.cron;
 
-    if (cron === "0 5 * * 1-5") {
+    if (cron === "0 5 * * *") {
       // Pull each user's persisted timezone alongside the row so the
       // generator stamps `briefing_date` in their local calendar.
       // Without the TZ, cron would always stamp UTC's date — meaning

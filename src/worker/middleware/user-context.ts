@@ -155,7 +155,7 @@ export const userContext = createMiddleware<{
 
   const settings: UserSettings = {
     budgetCapMonthly: settingsRow?.budget_cap_monthly ?? 35,
-    briefingCron: settingsRow?.briefing_cron ?? "0 5 * * 1-5",
+    briefingCron: settingsRow?.briefing_cron ?? "0 5 * * *",
     relevanceThreshold: settingsRow?.relevance_threshold ?? 0.4,
     nearMissFloor: settingsRow?.near_miss_floor ?? 0.25,
     retentionDays: settingsRow?.retention_days ?? 365,

@@ -17,7 +17,7 @@ flowchart LR
 
     subgraph Worker["Cloudflare Worker (src/worker/)"]
         direction TB
-        Cron["Cron triggers<br/>5 AM UTC weekdays<br/>3 AM UTC Sunday"]
+        Cron["Cron triggers<br/>5 AM UTC daily<br/>3 AM UTC Sunday"]
         Routes["Hono routes<br/>(/api/*)"]
         Pipeline["Briefing pipeline<br/>(services/briefing-generator)"]
         LLMReg["LLM registry<br/>(Anthropic / OpenAI / …)"]

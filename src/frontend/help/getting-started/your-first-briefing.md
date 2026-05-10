@@ -29,7 +29,7 @@ If you skip and want to come back to it later, both fields live in **Settings â†
 
 ## After Setup
 
-Once the cold start is complete, your daily briefings generate automatically at **5:00 AM local time, Monday through Friday** via cron trigger. You can also trigger a manual briefing at any time from the briefing page.
+Once the cold start is complete, your daily briefings generate automatically at **5:00 AM UTC, every day** via cron trigger. The `briefing_date` is stamped in your local timezone, so the row matches your wall clock. You can also trigger a manual briefing at any time from the briefing page. If a particular day has no fresh signal worth a piece, the briefing finalizes with an explicit "no new content today" state rather than appearing broken.
 
 Each subsequent briefing refines your concept graph further.
 

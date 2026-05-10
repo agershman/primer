@@ -73,6 +73,19 @@ briefingReadRoutes.get("/briefing/today", async (c) => {
     .bind(briefing.id)
     .all();
 
+  // A finalized briefing with zero pieces is the original
+  // "missing briefing" surface area: the row exists, the first
+  // query above matches it, and the UI used to render an empty
+  // shell with no explanation. Promote `metadata.reason` (set by
+  // the generator's finalize step + the budget-cap path) to a
+  // top-level `noContentReason` so the UI can show an explicit
+  // empty state. `null` when the briefing has pieces or is still
+  // generating.
+  const briefingMetadata = JSON.parse((briefing.metadata as string) || "{}");
+  const isFinalized = briefing.status !== "generating";
+  const noContentReason =
+    isFinalized && pieces.results.length === 0 ? ((briefingMetadata.reason as string | undefined) ?? "unknown") : null;
+
   const quiz = await c.env.DB.prepare(
     `SELECT * FROM calibration_quizzes
      WHERE user_id = ? AND teaching_piece_id IN (
@@ -104,7 +117,7 @@ briefingReadRoutes.get("/briefing/today", async (c) => {
     briefing: {
       ...briefing,
       workContextSources: JSON.parse((briefing.work_context_sources as string) || "[]"),
-      metadata: JSON.parse((briefing.metadata as string) || "{}"),
+      metadata: briefingMetadata,
       // Surface the historical focus statement under a camelCase alias
       // so the frontend doesn't have to know about the join column.
       // Pre-versioning briefings (focus_version_id is NULL) get null
@@ -116,6 +129,7 @@ briefingReadRoutes.get("/briefing/today", async (c) => {
       // to render a subtle "no new movement on these topics" header
       // chip with deep-links back to each predecessor piece.
       redundantDrafts: parseRedundantDrafts(briefing.redundant_drafts as string | null),
+      noContentReason,
     },
     pieces: piecesWithResources,
     quiz,

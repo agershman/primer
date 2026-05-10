@@ -19,6 +19,22 @@ related:
 
 **Fix:** Trigger a manual generation from the briefing page or call `POST /api/briefing/generate`. Check the response for specific errors.
 
+## "No new content today"
+
+**Symptom:** The briefing page shows an explicit "No new content today" panel instead of teaching pieces.
+
+**Why this happens:** The cron ran successfully but found nothing worth a fresh piece — no new work signals, no adjacent reading material, no decaying concepts. This is the intentional empty state, not a bug. The briefing row exists with `metadata.reason = "no_candidates"` and zero teaching pieces.
+
+**Fix:** None required. The next day's run will pick up new signal. If you want a piece anyway (e.g., to revisit a concept), click **Generate anyway** to trigger a manual run.
+
+## "Briefing generation failed" / "Try again"
+
+**Symptom:** The briefing page shows a warning-styled "Briefing generation failed" panel.
+
+**Why this happens:** Candidates were selected for teaching pieces but every LLM call errored — usually transient (provider blip, network timeout, rate limit). The briefing row carries `metadata.reason = "all_pieces_failed"`.
+
+**Fix:** Click **Try again**. If it persists, check `/api/health` and the worker logs. Other reasons that surface here: `monthly_budget_exceeded` (raise `BUDGET_CAP_MONTHLY` or wait for billing cycle reset) and `cancelled` (a previous run was cancelled before it finished).
+
 ## Partial Briefing
 
 **Symptom:** The briefing loaded but only has 1–2 pieces instead of the usual 3–5.

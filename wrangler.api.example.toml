@@ -16,7 +16,12 @@ compatibility_flags = ["nodejs_compat"]
 cpu_ms = 300000
 
 [triggers]
-crons = ["0 5 * * 1-5", "0 3 * * SUN"]
+# Briefings run daily — work, incidents, and reading material don't
+# pause on weekends or holidays. If a given day has nothing worth
+# surfacing, the generator finalizes the row with `metadata.reason`
+# so the UI can show an explicit "no content today" state rather
+# than looking broken. See briefing-generator.ts + read.ts.
+crons = ["0 5 * * *", "0 3 * * SUN"]
 
 [[d1_databases]]
 binding = "DB"

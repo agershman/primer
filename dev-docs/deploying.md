@@ -8,11 +8,11 @@ For the step-by-step deploy commands themselves, see [Production setup (one-time
 
 | Service | What it stores / does | Configured via |
 |---------|------------------------|-----------------|
-| **Workers** (`primer-api`) | Hono API surface, weekday cron, Sunday maintenance cron, every `/api/*` route | `wrangler.api.toml` → `name`, `main`, `compatibility_date`, `[triggers].crons` |
+| **Workers** (`primer-api`) | Hono API surface, daily briefing cron, Sunday maintenance cron, every `/api/*` route | `wrangler.api.toml` → `name`, `main`, `compatibility_date`, `[triggers].crons` |
 | **Pages** (`primer-ui`) | Static Vite build of the React frontend, served from Cloudflare's edge with a service binding to `primer-api` so `/api/*` requests stay on Cloudflare's network | `wrangler.toml` |
 | **D1** (`primer-db`) | SQLite database — users, briefings, teaching pieces, concepts, depth history, notifications, the `usage_events` cost ledger | `wrangler.api.toml` → `[[d1_databases]]`. Schema lives in `migrations/`, applied via `bun run db:migrate:remote`. |
 | **Workers AI** (`AI` binding) | Cloudflare-hosted TTS (Deepgram Aura voices + MeloTTS). Optional — only used when the user picks an Aura voice. | `wrangler.api.toml` → `[ai].binding = "AI"` |
-| **Cron Triggers** | Two crons — daily briefings at `0 5 * * 1-5` (5 AM UTC weekdays) and maintenance at `0 3 * * SUN` | `wrangler.api.toml` → `[triggers].crons` |
+| **Cron Triggers** | Two crons — daily briefings at `0 5 * * *` (5 AM UTC every day) and maintenance at `0 3 * * SUN` | `wrangler.api.toml` → `[triggers].crons` |
 | **Cloudflare Access** (recommended) | Auth in front of the Worker — Primer reads the `CF-Access-JWT-Assertion` header to identify users | Cloudflare Zero Trust dashboard |
 
 You don't need a domain registered with Cloudflare. The default `*.workers.dev` and `*.pages.dev` URLs work fine for personal / internal deployments. If you have a custom domain, add it via the Workers / Pages routing UI.
@@ -142,7 +142,7 @@ All pricing in this section is **as of April 2026**, sourced from each provider'
 | **D1** | Free up to 25B rows read + 50M rows written + 5GB on Workers Paid ([source](https://developer.cloudflare.com/d1/platform/pricing/)) | <10M reads, <500k writes, <100MB storage per user | **$0/mo** within free tier |
 | **Workers AI** (Aura TTS, optional) | $0.011 per 1k neurons; Aura @ $0.015/1k chars ([source](https://developers.cloudflare.com/workers-ai/platform/pricing/)) | Heavy listener: ~165k chars/mo | **$2.50/mo** |
 | **Pages** | Free with service binding to a Worker | Static frontend serving | **$0/mo** |
-| **Cron Triggers** | Free, included with Workers Paid | 2 crons (weekday briefings + Sunday maintenance) | **$0/mo** |
+| **Cron Triggers** | Free, included with Workers Paid | 2 crons (daily briefings + Sunday maintenance) | **$0/mo** |
 | **Cloudflare Access** | Free for ≤50 users; $7/user/mo above ([source](https://www.cloudflare.com/teams-pricing/)) | Single user / small team | **$0/mo** within free tier |
 
 **Cloudflare floor: $5/mo** for any deployment past the free thresholds. Single-user deployments won't approach D1 or Workers AI overage levels.
@@ -167,7 +167,7 @@ Anthropic pricing as of April 2026: Haiku 4.5 = $1/$5 per 1M tokens; Sonnet 4 = 
 
 ### Single-user monthly estimates (low / medium / high)
 
-22 weekday briefings/month is the base assumption. Audio is character-billed and 24h-cached at the edge, so re-listens don't double the cost.
+~30 daily briefings/month is the base assumption (cron runs every day; the per-briefing LLM cost below applies to days that produce teaching pieces, and quieter days that finalize as `no_candidates` still incur the cheaper extraction + scoring steps). Audio is character-billed and 24h-cached at the edge, so re-listens don't double the cost.
 
 | Tier | Profile | Daily | Weekly | Monthly |
 |------|---------|-------|--------|---------|

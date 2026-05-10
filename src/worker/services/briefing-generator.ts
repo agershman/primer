@@ -66,6 +66,7 @@ import {
   type BriefingResult,
   CancelledError,
   checkCancelled,
+  classifyNoContentReason,
   safeStep,
   selectEnabledSingletons,
   summarizeFeedSources,
@@ -136,13 +137,30 @@ export async function generateDailyBriefing(
 
   const budgetCap = parseFloat(env.BUDGET_CAP_MONTHLY || "35");
   if (await isBudgetExceeded(db, userId, budgetCap)) {
-    await db
-      .prepare(`UPDATE briefings SET status = 'failed', metadata = ?, updated_at = datetime('now') WHERE id = ?`)
-      .bind(
-        JSON.stringify({ step: "failed", stepLabel: "Monthly budget cap exceeded", reason: "monthly_budget_exceeded" }),
-        briefingId,
-      )
-      .run();
+    // The cron path arrives here with no row pre-inserted, so a bare
+    // UPDATE silently no-ops and the user just sees yesterday's
+    // briefing with no explanation. INSERT-OR-REPLACE makes the
+    // budget-cap state explicit on today's row so the read endpoint
+    // can surface it.
+    const budgetMetadata = JSON.stringify({
+      step: "failed",
+      stepLabel: "Monthly budget cap exceeded",
+      reason: "monthly_budget_exceeded",
+    });
+    if (existingBriefingId) {
+      await db
+        .prepare(`UPDATE briefings SET status = 'failed', metadata = ?, updated_at = datetime('now') WHERE id = ?`)
+        .bind(budgetMetadata, briefingId)
+        .run();
+    } else {
+      await db
+        .prepare(
+          `INSERT OR REPLACE INTO briefings (id, user_id, briefing_date, generated_at, status, metadata, focus_version_id, created_at, updated_at)
+           VALUES (?, ?, ?, datetime('now'), 'failed', ?, ?, datetime('now'), datetime('now'))`,
+        )
+        .bind(briefingId, userId, today, budgetMetadata, focusVersionId)
+        .run();
+    }
 
     return { briefingId, status: "failed" as const, pieceCount: 0, errors: ["Monthly budget cap exceeded"] };
   }
@@ -1191,8 +1209,24 @@ export async function generateDailyBriefing(
       itemsProcessed: null,
     });
 
-    // Finalize briefing
+    // Finalize briefing.
+    //
+    // A briefing can finalize with zero teaching pieces in three
+    // distinct ways; we tag the row with a structured `reason` so the
+    // read endpoint and UI can show an explicit "why is this empty"
+    // message instead of a silently-blank page (the original
+    // missing-briefing bug):
+    //   - no_candidates:    nothing surfaced from work + feeds + decay
+    //   - all_pieces_failed: candidates existed but every LLM call errored
+    //   - partial:           some pieces persisted but errors occurred
+    // When pieces > 0 and no errors, no reason is set.
+    const totalPieces = position;
     const status = errors.length > 0 ? "partial" : "generated";
+    const noContentReason = classifyNoContentReason({
+      totalPieces,
+      selectedCount: selected.length,
+      errorCount: errors.length,
+    });
 
     await db
       .prepare(
@@ -1208,6 +1242,10 @@ export async function generateDailyBriefing(
           existingConceptsReferenced: extractionStep.data.existingConceptIds.length,
           adjacentItemsScored: adjacentStep.data.relevant.length + adjacentStep.data.nearMisses.length,
           errors,
+          totalPieces,
+          candidateCount: candidates.length,
+          selectedCount: selected.length,
+          ...(noContentReason ? { reason: noContentReason } : {}),
         }),
         JSON.stringify(modelsUsed),
         briefingId,
