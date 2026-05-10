@@ -100,13 +100,19 @@ cross-cutting concerns, and explicitly excludes off-topic surfaces.`;
   //     consumes both responses the same way.
   const rulesBlock = instruction
     ? `APPLY-INSTRUCTION RULES:
-- Treat the user's instruction as the directive. Apply only what it asks
-  for. Do NOT do an unrelated rewrite at the same time.
-- Preserve everything in the existing statement that the instruction
-  doesn't ask you to change. Same phrasing, same facts, same tone.
-- If the instruction is vague or contradictory (e.g. "make it better"),
-  do the most conservative interpretation and call out in the rationale
-  what you chose.
+- The user's instruction tells you what to change about their existing
+  statement. You MUST produce a paragraph that reflects that change.
+  Returning the existing statement unchanged is a failure.
+- Apply the instruction directly. If the instruction says "shorter",
+  the output must be shorter. If it says "add that I love X", the
+  output must mention X. If it says "remove the bit about Y", Y must
+  be gone.
+- Preserve the parts of the existing statement that the instruction
+  doesn't touch. Don't take the opportunity to do an unrelated rewrite
+  while you're in there.
+- If the instruction is genuinely vague (e.g. "make it better"),
+  make your best judgment edit AND explain in the rationale what you
+  chose to interpret it as. Do not punt by returning the original.
 - Do not invent facts the instruction didn't supply. If it says "add
   that I love TypeScript", add exactly that — don't also add years of
   experience or other stack details the user didn't mention.
@@ -115,10 +121,10 @@ cross-cutting concerns, and explicitly excludes off-topic surfaces.`;
   explicitly asks for more or less. Hard cap 1500 chars.
 - Plain prose, no bullet points, no markdown.
 
-OUTPUT FORMAT (strict JSON):
+OUTPUT FORMAT (strict JSON, both fields required and non-empty):
 {
-  "refined": "<the updated paragraph with the instruction applied>",
-  "rationale": "<1-3 sentence explanation of how you applied the instruction>"
+  "refined": "the updated paragraph with the instruction applied",
+  "rationale": "1-3 sentence explanation of how you applied the instruction"
 }`
     : `REWRITE RULES:
 - Keep the user's actual content and intent. Do NOT invent facts about them.
@@ -174,10 +180,34 @@ ${rulesBlock}`;
       maxTokens: 1024,
     });
     await recordTokenUsage(c.env.DB, user.userId, "prompt_refinement", refinementSpec, usage);
-    return c.json({
-      refined: result.refined?.trim() ?? draft,
-      rationale: result.rationale?.trim() ?? "",
-    });
+
+    const refinedOut = result.refined?.trim() ?? "";
+    const rationaleOut = result.rationale?.trim() ?? "";
+
+    // Fail loudly instead of silently echoing the draft. Pre-fix, a missing
+    // `refined` field fell back to the original draft via `?? draft`, which
+    // made model failures look identical to a successful no-op refinement —
+    // user saw "Before == After" in the diff and accepting it changed
+    // nothing in the textarea. Surface a real error so the dialog shows it.
+    if (!refinedOut) {
+      console.error(
+        "[refine-prompt] empty refined field",
+        JSON.stringify({ kind, hasInstruction: !!instruction, result }).slice(0, 800),
+      );
+      return c.json({ error: "AI returned an empty refinement. Try a clearer instruction." }, 502);
+    }
+
+    // In instruction mode, the model echoing back the draft verbatim is also a
+    // failure mode — the instruction wasn't applied. Warn (don't block) so we
+    // get diagnostics from real traffic if this turns out to be common.
+    if (instruction && refinedOut === draft) {
+      console.warn(
+        "[refine-prompt] refined output identical to draft",
+        JSON.stringify({ kind, instructionPreview: instruction.slice(0, 120) }).slice(0, 400),
+      );
+    }
+
+    return c.json({ refined: refinedOut, rationale: rationaleOut });
   } catch (err) {
     console.error("[refine-prompt] failed:", err);
     return c.json({ error: "Refinement failed" }, 500);
