@@ -273,19 +273,36 @@ describe("baseline quiz generation", () => {
 });
 
 describe("user settings passed to generator", () => {
-  it("manual generate route loads and passes user settings", async () => {
+  it("manual generate route reuses the middleware-loaded user.settings (no partial column re-load)", async () => {
+    // Inline-loading just `source_config + budget_cap_monthly +
+    // relevance_threshold` was silently dropping `enabled_source_ids`
+    // (and `filter_prompt`, `source_filter_overrides`). The dropped
+    // gate then collapsed to `?? []` in the briefing-generator and
+    // filtered every adjacent feed out — the failure mode that put
+    // the user in a perpetual "No new content today" loop. The
+    // user-context middleware already loads the full row; the
+    // lifecycle handler now reuses that snapshot.
     const src = await readSrc("src/worker/routes/briefing.ts");
-    expect(src).toContain("source_config");
-    expect(src).toContain("FROM user_settings");
+    expect(src).toMatch(/const\s+userSettings\s*=\s*user\.settings\b/);
     // Multi-line tolerant: the call may be split across lines by the
     // formatter when wrapped inside a streaming-keepalive block.
     expect(src).toMatch(/generateDailyBriefing\([\s\S]*?userSettings,?\s*\)/);
+    // Negative: the partial load must not come back. Pinning each
+    // dropped column individually so a future refactor can't re-add
+    // a half-load and silently lose the gate again.
+    const partialLoadRe = /SELECT\s+source_config,\s*budget_cap_monthly,\s*relevance_threshold\s+FROM user_settings/;
+    expect(src).not.toMatch(partialLoadRe);
   });
 
   it("cron scheduled handler loads and passes user settings + timezone", async () => {
     const src = await readRepoFile("src/worker/index.ts");
-    expect(src).toContain("source_config FROM user_settings");
-    // Cron now SELECTs the user's timezone so it can stamp
+    // Settings now come from the shared `loadUserSettingsFromDb`
+    // helper so the cron path parses every JSON column the
+    // user-context middleware does (notably `enabled_source_ids` —
+    // see the briefing-no-candidates regression in the lifecycle
+    // route's history).
+    expect(src).toContain("loadUserSettingsFromDb");
+    // Cron still SELECTs the user's timezone so it can stamp
     // briefing_date in the user's local calendar — without this,
     // 5 AM UTC stamping rolls UTC-4 users onto "tomorrow" already.
     expect(src).toContain("SELECT id, timezone FROM users");
@@ -295,6 +312,9 @@ describe("user settings passed to generator", () => {
     expect(src).toMatch(
       /generateDailyBriefing\([\s\S]*?env\.DB[\s\S]*?userSettings[\s\S]*?user\.timezone/,
     );
+    // Negative: the cron must not fall back to the previous
+    // single-column load that omitted `enabled_source_ids`.
+    expect(src).not.toMatch(/SELECT\s+source_config\s+FROM user_settings/);
   });
 
   it("manual generate route streams a heartbeat keepalive so CF edge doesn't 524", async () => {

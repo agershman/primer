@@ -179,26 +179,19 @@ briefingLifecycleRoutes.post("/briefing/generate", async (c) => {
     console.warn("[generate] Failed to create notification:", err);
   }
 
-  // Load the user's saved settings so the generator applies their configured
-  // filters (Linear scope, Slack channels, time windows, models) — without
-  // this, the generator falls back to broad defaults and ignores the settings
-  // the preview panel shows.
-  const settingsRow = await db
-    .prepare("SELECT source_config, budget_cap_monthly, relevance_threshold FROM user_settings WHERE user_id = ?")
-    .bind(user.userId)
-    .first<{
-      source_config: string | null;
-      budget_cap_monthly: number | null;
-      relevance_threshold: number | null;
-    }>();
-
-  const userSettings = settingsRow
-    ? {
-        signalSurfaceMap: settingsRow.source_config ? JSON.parse(settingsRow.source_config) : {},
-        budgetCapMonthly: settingsRow.budget_cap_monthly ?? undefined,
-        relevanceThreshold: settingsRow.relevance_threshold ?? undefined,
-      }
-    : undefined;
+  // Pass the middleware-loaded settings straight through. The earlier
+  // shape pulled only `source_config`, `budget_cap_monthly`, and
+  // `relevance_threshold` — silently dropping `enabled_source_ids`,
+  // `filter_prompt`, and `source_filter_overrides`. The dropped
+  // `enabledSourceIds` then arrived at the adjacent-scanner call as
+  // `userSettings?.enabledSourceIds ?? []` (an empty array), which
+  // `adjacent-scanner.ts` reads as "filter every feed out" — so
+  // every refresh produced zero adjacent candidates, the selector
+  // had nothing to pick, and the briefing finalized as
+  // `no_candidates`. Reusing `user.settings` (already loaded by the
+  // user-context middleware) puts every column the pipeline expects
+  // back on the wire in one place.
+  const userSettings = user.settings;
 
   // Run generation while keeping the response stream alive.
   //

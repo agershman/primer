@@ -20,6 +20,7 @@ import { userRoutes } from "./routes/users.js";
 import { generateDailyBriefing } from "./services/briefing-generator.js";
 import { runMaintenanceJob } from "./services/maintenance.js";
 import type { Env, UserContext } from "./types.js";
+import { loadUserSettingsFromDb } from "./util/load-user-settings.js";
 
 type AppEnv = { Bindings: Env; Variables: { user: UserContext } };
 
@@ -80,12 +81,17 @@ export default {
       await runWithConcurrencyCap(userList, 3, async (user) => {
         console.log(`[cron] Generating daily briefing for user ${user.id}`);
         try {
-          const settingsRow = await env.DB.prepare("SELECT source_config FROM user_settings WHERE user_id = ?")
-            .bind(user.id)
-            .first<{ source_config: string | null }>();
-          const userSettings = settingsRow?.source_config
-            ? { signalSurfaceMap: JSON.parse(settingsRow.source_config) }
-            : undefined;
+          // Load the FULL settings row, not just `source_config`. The
+          // earlier shape silently dropped `enabled_source_ids`, which
+          // the briefing-generator passes into `scanAdjacentSources`
+          // — and the adjacent gate treats a missing list as "filter
+          // every feed out", not "no gate". The result was a cron
+          // path that always finalized as `no_candidates` once the
+          // empty-state UI started surfacing the row instead of
+          // hiding it. The shared loader keeps this in lockstep with
+          // the user-context middleware so both call sites parse the
+          // JSON columns the same way.
+          const userSettings = (await loadUserSettingsFromDb(env.DB, user.id)) ?? undefined;
 
           const result = await generateDailyBriefing(
             env.DB,
