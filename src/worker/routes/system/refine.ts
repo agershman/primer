@@ -1,11 +1,20 @@
 /**
  * AI-assisted refinement of About / Focus drafts.
  *
- * The user writes a freeform paragraph; this endpoint asks Sonnet to
- * rewrite it into a tight, specific paragraph that works well as a
- * prompt injection. The frontend shows a side-by-side diff and the
- * user accepts or dismisses. Returns `{ refined, rationale }` so the
- * user can see why the rewrite chose what it chose.
+ * Two modes share this endpoint, distinguished by whether the request
+ * carries an `instruction` field:
+ *
+ *   - No instruction: the user wrote a freeform paragraph and wants
+ *     Sonnet to tighten it into a prompt-ready paragraph. Original
+ *     behaviour.
+ *   - With instruction: the user is mostly happy with their existing
+ *     statement and wants a targeted edit applied to it ("shorter",
+ *     "add that I love TypeScript", "remove the bit about
+ *     Kubernetes"). Sonnet applies the instruction while preserving
+ *     everything else.
+ *
+ * Both modes return the same `{ refined, rationale }` shape so the
+ * frontend's side-by-side diff dialog handles them identically.
  *
  * @see ../system.ts — assembly entry point
  */
@@ -34,6 +43,10 @@ systemRefineRoutes.post("/me/refine-prompt", async (c) => {
   if (!draft) {
     return c.json({ error: "draft is required" }, 400);
   }
+  // Zod already trims `instruction`; treat empty-string-after-trim as absent
+  // so the route falls back cleanly to the original "tighten this draft"
+  // behaviour rather than feeding a blank instruction to Claude.
+  const instruction = parsed.data.instruction?.trim() || undefined;
 
   const purposeBlock =
     kind === "about"
@@ -76,16 +89,38 @@ explanation works, and sets a tone preference. Concrete and testable.`
 What that example does well: lists technical areas with specificity, lists
 cross-cutting concerns, and explicitly excludes off-topic surfaces.`;
 
-  const system = `You are helping refine a user-supplied paragraph that will be
-injected into other LLM prompts as user context. Your job is to rewrite the
-user's draft into a tight, prompt-ready paragraph that is more useful for
-downstream models.
+  // Two refinement modes share the same purpose/exemplar context but
+  // diverge on rules + user-message shape:
+  //   - "tighten" (no instruction): rewrite the whole draft into a
+  //     prompt-ready paragraph. This is the original behaviour.
+  //   - "instruction": apply a specific user-supplied edit ("shorter",
+  //     "add that I love TypeScript", "remove Kubernetes") to the
+  //     existing statement, preserving everything the instruction
+  //     doesn't touch. Output shape is identical so the dialog
+  //     consumes both responses the same way.
+  const rulesBlock = instruction
+    ? `APPLY-INSTRUCTION RULES:
+- Treat the user's instruction as the directive. Apply only what it asks
+  for. Do NOT do an unrelated rewrite at the same time.
+- Preserve everything in the existing statement that the instruction
+  doesn't ask you to change. Same phrasing, same facts, same tone.
+- If the instruction is vague or contradictory (e.g. "make it better"),
+  do the most conservative interpretation and call out in the rationale
+  what you chose.
+- Do not invent facts the instruction didn't supply. If it says "add
+  that I love TypeScript", add exactly that — don't also add years of
+  experience or other stack details the user didn't mention.
+- Use first-person ("I work on...", "I prefer..."). Never second-person.
+- Keep within 3-6 sentences and ~150-400 chars unless the instruction
+  explicitly asks for more or less. Hard cap 1500 chars.
+- Plain prose, no bullet points, no markdown.
 
-${purposeBlock}
-
-${exemplarBlock}
-
-REWRITE RULES:
+OUTPUT FORMAT (strict JSON):
+{
+  "refined": "<the updated paragraph with the instruction applied>",
+  "rationale": "<1-3 sentence explanation of how you applied the instruction>"
+}`
+    : `REWRITE RULES:
 - Keep the user's actual content and intent. Do NOT invent facts about them.
   If the draft is vague ("I'm a software engineer"), keep it vague — don't
   fabricate seniority or stack details.
@@ -106,6 +141,26 @@ OUTPUT FORMAT (strict JSON):
   "rationale": "<1-3 sentence explanation of what you changed and why>"
 }`;
 
+  const taskLine = instruction
+    ? `Your job is to apply the user's refinement instruction to their existing
+statement, preserving everything else. The output must still work well as
+prompt-injected user context for downstream models.`
+    : `Your job is to rewrite the user's draft into a tight, prompt-ready
+paragraph that is more useful for downstream models.`;
+
+  const system = `You are helping refine a user-supplied paragraph that will be
+injected into other LLM prompts as user context. ${taskLine}
+
+${purposeBlock}
+
+${exemplarBlock}
+
+${rulesBlock}`;
+
+  const userMessage = instruction
+    ? `Existing statement:\n\n${draft}\n\nUser's refinement instruction:\n\n${instruction}`
+    : `User's draft:\n\n${draft}`;
+
   const llm = llmClient(c.env);
   // Hard-coded to Sonnet 4 — the persona refinement step is short,
   // user-visible, and benefits from the smarter model. The override is
@@ -115,7 +170,7 @@ OUTPUT FORMAT (strict JSON):
     const { result, usage } = await llm.generateJson<{ refined: string; rationale: string }>({
       spec: refinementSpec,
       system,
-      user: `User's draft:\n\n${draft}`,
+      user: userMessage,
       maxTokens: 1024,
     });
     await recordTokenUsage(c.env.DB, user.userId, "prompt_refinement", refinementSpec, usage);

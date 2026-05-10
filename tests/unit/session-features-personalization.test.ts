@@ -670,7 +670,11 @@ describe("About + Refine UI", () => {
     // Single shared component opens the refine dialog with whichever
     // kind it was instantiated for — replaces the two parallel
     // setRefineState calls that lived in the old single-file panel.
-    expect(stmt).toContain("setRefineOpen(true)");
+    // The state was renamed from `refineOpen: boolean` to
+    // `refineMode: "tighten" | "instruction" | null` once the
+    // instruction-driven refinement entry point was added — both
+    // entry points share the same dialog, distinguished by `mode`.
+    expect(stmt).toMatch(/setRefineMode\(("tighten"|"instruction")\)/);
     expect(stmt).toMatch(/<RefineDialog[\s\S]{0,200}kind=\{kind\}/);
   });
 });

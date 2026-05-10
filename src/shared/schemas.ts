@@ -39,6 +39,12 @@ import { z } from "zod";
 export const RefinePromptRequest = z.object({
   kind: z.enum(["about", "focus"]),
   draft: z.string().min(1, "draft is required").max(4000, "draft too long (max 4000 chars)"),
+  // Optional natural-language instruction describing how the user wants
+  // the existing draft refined ("shorter", "add that I love TypeScript",
+  // "remove the bit about Kubernetes"). When omitted, the route falls
+  // back to its original "tighten this draft" behaviour. Trimmed at the
+  // edge so whitespace-only instructions are treated as absent.
+  instruction: z.string().trim().max(2000, "instruction too long (max 2000 chars)").optional(),
 });
 export type RefinePromptRequest = z.infer<typeof RefinePromptRequest>;
 
