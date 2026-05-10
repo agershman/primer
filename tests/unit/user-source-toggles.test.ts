@@ -96,9 +96,17 @@ describe("Briefing pipeline gates on enabled source IDs", () => {
     expect(src).toMatch(/enabledKinds[\s\S]{0,80}\.filter\(\(s\) => enabledKinds\.has\(s\.kind\)\)/);
   });
 
-  it("briefing-generator passes the user's enabledSourceIds into scanAdjacentSources", async () => {
+  it("briefing-generator passes the user's enabledSourceIds into scanAdjacentSources without coercing undefined to []", async () => {
+    // Match the singleton-gate semantics: `undefined` = no gate
+    // (caller didn't load settings), `[]` = user explicitly opted
+    // nothing in. The earlier `?? []` fallback collapsed both into
+    // "filter every feed out" and stranded the cron path on
+    // `no_candidates` whenever it skipped loading
+    // `enabled_source_ids`.
     const src = await read("src/worker/services/briefing-generator.ts");
-    expect(src).toMatch(/enabledSourceIds:\s*userSettings\?\.enabledSourceIds\s*\?\?\s*\[\]/);
+    expect(src).toMatch(/enabledSourceIds:\s*userSettings\?\.enabledSourceIds\s*,/);
+    // Pin the negative: the `?? []` fallback must not come back.
+    expect(src).not.toMatch(/enabledSourceIds:\s*userSettings\?\.enabledSourceIds\s*\?\?\s*\[\]/);
   });
 });
 

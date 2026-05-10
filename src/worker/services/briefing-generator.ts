@@ -483,8 +483,17 @@ export async function generateDailyBriefing(
             // get scored in their own bucket using that prompt.
             sourceFilterOverrides: userSettings?.sourceFilterOverrides ?? {},
             // Per-user opt-in: skip source instances whose kind the
-            // user hasn't enabled.
-            enabledSourceIds: userSettings?.enabledSourceIds ?? [],
+            // user hasn't enabled. Pass through as-is so the
+            // adjacent-scanner gets the same undefined-vs-array
+            // semantics the singleton gate uses (undefined = no
+            // gate, scan every enabled instance; empty array = the
+            // user explicitly opted nothing in). The earlier `?? []`
+            // collapsed both "settings weren't loaded" and "user
+            // turned everything off" into the same "filter every
+            // feed out" branch — the cron path's missing
+            // `enabled_source_ids` load (now fixed) used to land
+            // here and silently produce zero adjacent candidates.
+            enabledSourceIds: userSettings?.enabledSourceIds,
           },
           env,
         );
