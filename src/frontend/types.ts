@@ -171,6 +171,19 @@ export interface BriefingData {
    * entry deep-linking back to the predecessor piece.
    */
   redundantDrafts?: RedundantDraftEntry[];
+  /**
+   * Set on a finalized briefing that has zero teaching pieces, so the
+   * UI can render an explicit "no content today" state instead of an
+   * empty shell. Possible values:
+   *   - "no_candidates":         nothing in the user's signal surfaces
+   *                              warranted a piece today
+   *   - "all_pieces_failed":     candidates existed but every LLM call
+   *                              errored — try regenerating
+   *   - "monthly_budget_exceeded": LLM spend hit the monthly cap
+   *   - "cancelled" / "unknown": catch-alls
+   * `null` when pieces > 0 or when the briefing is still generating.
+   */
+  noContentReason?: string | null;
 }
 
 export interface WeeklyStats {

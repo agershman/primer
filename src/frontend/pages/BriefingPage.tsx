@@ -225,6 +225,21 @@ export function BriefingPage() {
   const weeklyStats = briefing?.metadata?.weeklyStats;
   const isStillGenerating = generating || briefing?.status === "generating";
 
+  // A finalized briefing with zero pieces was previously the
+  // "missing briefing" failure mode — the row matched on date but
+  // the page rendered an empty shell with no explanation. The
+  // worker now tags these rows with `noContentReason` so we can
+  // show an explicit, intentional empty state.
+  if (briefing && !isStillGenerating && pieces.length === 0) {
+    return (
+      <NoContentState
+        date={briefingDate}
+        reason={briefing.noContentReason ?? "unknown"}
+        onRegenerate={generate}
+      />
+    );
+  }
+
   return (
     <div className="animate-fade-in">
       {briefing?.status === "partial" && !isStillGenerating && (
@@ -391,6 +406,64 @@ function LoadingState() {
       <div className="h-4 w-full rounded bg-surface-active animate-pulse" />
       <div className="h-4 w-5/6 rounded bg-surface-active animate-pulse" />
       <div className="h-4 w-2/3 rounded bg-surface-active animate-pulse" />
+    </div>
+  );
+}
+
+function NoContentState({ date, reason, onRegenerate }: { date: string; reason: string; onRegenerate: () => void }) {
+  // Maps the worker's structured reason codes (set in
+  // briefing-generator.ts) to user-facing copy. The "intentional"
+  // flag distinguishes a quiet day (cron ran, nothing surfaced)
+  // from a failure (cron tried, something broke) — the former gets
+  // a calm message, the latter gets a clear "try again" affordance.
+  const copy: Record<string, { title: string; body: string; intentional: boolean }> = {
+    no_candidates: {
+      title: "No new content today",
+      body: "Nothing in your work, feeds, or learning queue surfaced something worth a fresh briefing today. Tomorrow's run will pick up new signal.",
+      intentional: true,
+    },
+    all_pieces_failed: {
+      title: "Briefing generation failed",
+      body: "Candidates were selected but every teaching piece errored. This is usually transient — try regenerating.",
+      intentional: false,
+    },
+    monthly_budget_exceeded: {
+      title: "Monthly LLM budget reached",
+      body: "Generation is paused until the next billing cycle, or until you raise BUDGET_CAP_MONTHLY.",
+      intentional: false,
+    },
+    cancelled: {
+      title: "Generation was cancelled",
+      body: "Today's briefing was cancelled before it finished. Regenerate to try again.",
+      intentional: false,
+    },
+    unknown: {
+      title: "No briefing today",
+      body: "The briefing finalized without any pieces. Regenerate or check the worker logs for details.",
+      intentional: false,
+    },
+  };
+  const message = copy[reason] ?? copy.unknown;
+
+  return (
+    <div className="animate-fade-in">
+      <div className="font-ui text-xs sm:text-sm text-text-dim uppercase tracking-wider mb-2">{formatDate(date)}</div>
+      <p className="font-display text-lg font-normal text-text-secondary italic leading-relaxed mb-6">
+        {message.title}
+      </p>
+      <div
+        className={`border rounded-lg p-6 text-center ${
+          message.intentional ? "border-border-subtle" : "border-warning-dim bg-warning-dim/30"
+        }`}
+      >
+        <p className="font-ui text-sm text-text-dim mb-4">{message.body}</p>
+        <button
+          onClick={onRegenerate}
+          className="font-ui text-sm font-medium text-accent bg-accent-dim hover:bg-accent/20 rounded-md px-4 py-2 transition-colors min-h-[44px]"
+        >
+          {message.intentional ? "Generate anyway" : "Try again"}
+        </button>
+      </div>
     </div>
   );
 }
