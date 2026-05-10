@@ -15,6 +15,10 @@ import { RefineDialog } from "./RefineDialog";
  *   • Pre-fills with the current focus statement.
  *   • ✨ Refine with AI → opens the shared `RefineDialog` and writes
  *     the accepted output back into the textarea.
+ *   • 🎙 Refine with instruction → opens the same dialog in
+ *     instruction mode, letting the user type or dictate a targeted
+ *     edit ("shorter", "add X", "remove Y") instead of an unconstrained
+ *     tighten.
  *   • Save → POST `/api/me/focus`, which is idempotent: if the user
  *     hits Save without changing the statement, it returns the
  *     existing version rather than minting a duplicate.
@@ -48,7 +52,11 @@ export function FocusEditor({ currentFocus, onSaved, onCancel }: FocusEditorProp
   const [draft, setDraft] = useState(currentFocus ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [refineOpen, setRefineOpen] = useState(false);
+  // `null` = closed; otherwise the dialog opens in the named mode.
+  // Two entry points share the same dialog: the original "tighten my
+  // draft" flow and the instruction-driven flow ("apply this edit"),
+  // matching the Settings panel's UX so both surfaces stay consistent.
+  const [refineMode, setRefineMode] = useState<"tighten" | "instruction" | null>(null);
   // Live dictation state — same continuous voice-mode pattern used on
   // quiz answer textareas and the chat input. Tap mic, talk freely,
   // pauses are fine, auto-stops after 5 s of silence (or tap again).
@@ -60,11 +68,11 @@ export function FocusEditor({ currentFocus, onSaved, onCancel }: FocusEditorProp
   // of us. The shared RefineDialog handles its own dismissal.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !refineOpen) onCancel();
+      if (e.key === "Escape" && !refineMode) onCancel();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onCancel, refineOpen]);
+  }, [onCancel, refineMode]);
 
   const dirty = draft.trim().length > 0 && draft.trim() !== (currentFocus ?? "").trim();
   const canSave = dirty && !saving;
@@ -167,12 +175,25 @@ export function FocusEditor({ currentFocus, onSaved, onCancel }: FocusEditorProp
         <div className="shrink-0 px-6 py-3 border-t border-border-subtle flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
-            onClick={() => setRefineOpen(true)}
+            onClick={() => setRefineMode("tighten")}
             disabled={draft.trim().length < 10}
             className="px-3 py-1.5 rounded-md border border-border-subtle text-xs font-mono text-text-secondary hover:bg-surface-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             title={draft.trim().length < 10 ? "Write a sentence first" : "Ask Claude to tighten your draft"}
           >
             ✨ Refine with AI
+          </button>
+          <button
+            type="button"
+            onClick={() => setRefineMode("instruction")}
+            disabled={draft.trim().length < 10}
+            className="px-3 py-1.5 rounded-md border border-border-subtle text-xs font-mono text-text-secondary hover:bg-surface-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title={
+              draft.trim().length < 10
+                ? "Write a sentence first"
+                : "Tell Claude how to refine your draft (type or dictate)"
+            }
+          >
+            🎙 Refine with instruction
           </button>
           <button
             type="button"
@@ -193,14 +214,15 @@ export function FocusEditor({ currentFocus, onSaved, onCancel }: FocusEditorProp
         </div>
       </div>
 
-      {refineOpen && (
+      {refineMode && (
         <RefineDialog
           kind="focus"
           draft={draft}
-          onCancel={() => setRefineOpen(false)}
+          mode={refineMode}
+          onCancel={() => setRefineMode(null)}
           onAccept={(refined) => {
             setDraft(refined);
-            setRefineOpen(false);
+            setRefineMode(null);
           }}
         />
       )}
