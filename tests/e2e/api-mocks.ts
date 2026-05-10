@@ -51,7 +51,7 @@ const DEFAULT_USER = {
   aboutVersionId: null,
   settings: {
     budgetCapMonthly: 35,
-    briefingCron: "0 5 * * 1-5",
+    briefingCron: "0 5 * * *",
     relevanceThreshold: 0.4,
     nearMissFloor: 0.25,
     retentionDays: 365,

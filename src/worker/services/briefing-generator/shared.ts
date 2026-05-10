@@ -189,3 +189,42 @@ export function selectEnabledSingletons(
   const enabled: Set<string> = new Set(enabledSourceIds);
   return providers.filter((p) => enabled.has(p.id));
 }
+
+/**
+ * Classify why a briefing finalized with zero teaching pieces, so the
+ * row can carry a structured `metadata.reason` and the read endpoint
+ * + UI can show an explicit "no content today" state instead of a
+ * silently-empty page (the original missing-briefing bug).
+ *
+ * Inputs:
+ *   - totalPieces: pieces actually persisted to `teaching_pieces`
+ *   - selectedCount: candidates the selector picked to generate
+ *   - errorCount:  number of generation errors collected
+ *
+ * Returns null when totalPieces > 0 (the briefing has content; no
+ * reason to surface). Otherwise classifies into:
+ *   - "no_candidates":     selector found nothing worth a piece
+ *   - "all_pieces_failed": selector picked candidates but every LLM
+ *                          call errored
+ *
+ * The budget-cap and cancelled paths set their own reasons directly
+ * and don't go through this helper — they bail out before generation
+ * runs at all, so the (selected, errors) signal isn't meaningful for
+ * them.
+ */
+export type NoContentReason = "no_candidates" | "all_pieces_failed";
+
+export function classifyNoContentReason(args: {
+  totalPieces: number;
+  selectedCount: number;
+  errorCount: number;
+}): NoContentReason | null {
+  if (args.totalPieces > 0) return null;
+  if (args.selectedCount === 0) return "no_candidates";
+  if (args.errorCount > 0) return "all_pieces_failed";
+  // Selected > 0 but no pieces and no errors shouldn't happen in
+  // practice — every selected candidate either persists a piece or
+  // pushes an error. Bucket as no_candidates so the user gets the
+  // calmer copy rather than a misleading "everything failed".
+  return "no_candidates";
+}

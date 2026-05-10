@@ -13,7 +13,7 @@ Primer's production architecture is split across two Cloudflare deployables:
 - **`primer-api`** — the Hono Worker. Runs all `/api/*` routes, owns the D1 database, holds every secret. Configured by `wrangler.api.toml`.
 - **`primer-ui`** — Cloudflare Pages serving the static Vite build. Holds a service binding to `primer-api` so frontend `/api/*` requests reach the Worker without leaving the Cloudflare edge. Configured by `wrangler.toml`.
 
-Cron triggers (5 AM weekday briefings, 3 AM Sunday maintenance) live on the `primer-api` Worker.
+Cron triggers (5 AM daily briefings, 3 AM Sunday maintenance) live on the `primer-api` Worker.
 
 ## One-time setup
 

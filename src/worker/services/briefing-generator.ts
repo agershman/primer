@@ -66,6 +66,7 @@ import {
   type BriefingResult,
   CancelledError,
   checkCancelled,
+  classifyNoContentReason,
   safeStep,
   selectEnabledSingletons,
   summarizeFeedSources,
@@ -1221,14 +1222,11 @@ export async function generateDailyBriefing(
     // When pieces > 0 and no errors, no reason is set.
     const totalPieces = position;
     const status = errors.length > 0 ? "partial" : "generated";
-    const noContentReason =
-      totalPieces === 0
-        ? selected.length === 0
-          ? "no_candidates"
-          : errors.length > 0
-            ? "all_pieces_failed"
-            : "no_candidates"
-        : null;
+    const noContentReason = classifyNoContentReason({
+      totalPieces,
+      selectedCount: selected.length,
+      errorCount: errors.length,
+    });
 
     await db
       .prepare(
