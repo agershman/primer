@@ -114,6 +114,72 @@ const SpeechRecognitionImpl: SpeechRecognitionConstructor | undefined =
 // continuous mode rather than tear the session down.
 const TRANSIENT_ERRORS = new Set(["no-speech", "aborted", "audio-capture"]);
 
+/**
+ * Return the portion of `newTranscript` that hasn't already been emitted
+ * to the parent in this dictation session, given the accumulated text
+ * we've emitted so far (`sessionText`, space-joined the same way the
+ * parent appends to its textarea).
+ *
+ * Designed to defang Android Chrome's cumulative-final bug where the
+ * same utterance gets emitted N times with growing transcripts. Three
+ * cases:
+ *
+ *  1. Exact-tail duplicate — sessionText ends with newTranscript (the
+ *     same final replayed): return "" (nothing to emit).
+ *  2. Prefix-extension — newTranscript starts with sessionText (the
+ *     utterance grew): return only the trailing remainder.
+ *  3. Word-boundary overlap — sessionText's suffix matches
+ *     newTranscript's prefix on a word boundary (e.g. "...of single"
+ *     followed by "single tenancy"): return the non-overlapping
+ *     remainder.
+ *  4. Otherwise: return the whole transcript as-is (new content, no
+ *     overlap to strip).
+ *
+ * Word-boundary alignment in case 3 is important: matching on raw
+ * character substrings can produce false positives on short common
+ * suffixes ("a", "the", "in"). Requiring the overlap to start at a
+ * word boundary keeps real speech from being chewed.
+ *
+ * Exported for testing.
+ */
+export function dedupeAgainstSession(sessionText: string, newTranscript: string): string {
+  const next = newTranscript.trim();
+  if (!next) return "";
+  const prev = sessionText.trim();
+  if (!prev) return next;
+
+  // Case 1: exact-tail duplicate.
+  if (prev === next || prev.endsWith(` ${next}`)) return "";
+
+  // Case 2: prefix-extension at a word boundary. Require `prev` to be at
+  // least 3 chars and the prefix match to end on whitespace in `next`, so
+  // we don't strip "Cind" out of "Cinders" or "I" out of "I really like".
+  if (prev.length >= 3 && next.startsWith(`${prev} `)) {
+    return next.slice(prev.length + 1).trimStart();
+  }
+
+  // Case 3: word-boundary overlap. Walk possible overlap lengths from
+  // the longest plausible down, and accept only if the overlap starts
+  // at a word boundary in prev (i.e. preceded by whitespace or at the
+  // string start) AND ends at a word boundary in next (i.e. followed
+  // by whitespace or at the string end).
+  const maxOverlap = Math.min(prev.length, next.length);
+  for (let len = maxOverlap; len > 0; len--) {
+    const tail = prev.slice(-len);
+    if (tail !== next.slice(0, len)) continue;
+    const boundaryBefore = prev.length === len || /\s/.test(prev[prev.length - len - 1] ?? "");
+    const boundaryAfter = next.length === len || /\s/.test(next[len] ?? "");
+    if (boundaryBefore && boundaryAfter) {
+      const remainder = next.slice(len).trimStart();
+      // Avoid stripping single-character or single-letter overlaps that
+      // are more likely coincidence than the cumulative-final bug.
+      if (len >= 3) return remainder;
+    }
+  }
+
+  return next;
+}
+
 export function DictationButton({
   onTranscript,
   continuous = false,
@@ -135,6 +201,13 @@ export function DictationButton({
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Idle watchdog — bumped every time the recognizer hands us new audio.
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Concatenation of every final transcript we've actually emitted to the
+  // parent during this dictation session. Mirrors how the parent joins
+  // emissions (space-separated). Used to dedupe cumulative-final emissions
+  // from mobile Chrome — see the long comment in `onresult`. Survives
+  // auto-restarts within a session; reset to "" each time the user taps
+  // mic to begin a fresh session.
+  const sessionEmittedTextRef = useRef("");
 
   // Notify parent when listening state changes so it can update UI (e.g.
   // make a textarea read-only). Wrapped so the closure in `toggle` doesn't
@@ -205,18 +278,51 @@ export function DictationButton({
     // firing during long stretches of silence (the original bug).
     // We only bump on actual speech events (`onresult`).
 
+    // Two layers of dedup defend against Android Chrome's
+    // `continuous: true` + `interimResults: true` misbehaviour, which
+    // produces the textarea-fills-with-duplicates bug:
+    //   "Cinders Cinders Cinders implementation Cinders implementation
+    //    of single single tenancy"
+    //
+    // What the buggy browser does:
+    //  (a) Re-emits already-finalized results in subsequent `onresult`
+    //      events without advancing `event.resultIndex` — trusting
+    //      `resultIndex` alone replays old results.
+    //  (b) Emits each chunk of the same utterance as a new final whose
+    //      `transcript` contains everything said so far — so the second
+    //      final is "Cinders implementation", the third is "Cinders
+    //      implementation of single", etc. The result indices keep
+    //      growing, so index-based dedup doesn't catch this; only
+    //      content-based dedup does.
+    //
+    // Layer 1 (per-recognizer index dedup) handles (a): walk all
+    // results and only emit indices we haven't seen finalised in this
+    // recognizer instance.
+    // Layer 2 (session-level text-overlap dedup) handles (b): track
+    // every final transcript we've actually emitted across the whole
+    // dictation session (including auto-restarts), and when a new
+    // final shares a suffix-of-emitted / prefix-of-new overlap, emit
+    // only the non-overlapping remainder. The session ref is reset by
+    // `toggle()` at the start of each fresh mic tap, so previous
+    // dictations don't leak across sessions.
+    let lastEmittedFinalIndex = -1;
+
     recognition.onresult = (event: SpeechRecognitionResultEvent) => {
       bumpIdleTimer();
-      // Walk results from the resultIndex forward — this is what the spec
-      // gives us when continuous=true, so we don't double-process previous
-      // results that have already been finalized in earlier callbacks.
       let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
         const transcript = result[0]?.transcript ?? "";
         if (!transcript) continue;
         if (result.isFinal) {
-          onTranscriptRef.current?.(transcript);
+          if (i <= lastEmittedFinalIndex) continue;
+          lastEmittedFinalIndex = i;
+          const remainder = dedupeAgainstSession(sessionEmittedTextRef.current, transcript);
+          if (!remainder) continue;
+          onTranscriptRef.current?.(remainder);
+          sessionEmittedTextRef.current = sessionEmittedTextRef.current
+            ? `${sessionEmittedTextRef.current} ${remainder}`
+            : remainder;
         } else {
           interim += (interim ? " " : "") + transcript;
         }
@@ -294,6 +400,9 @@ export function DictationButton({
       return;
     }
     userStoppedRef.current = false;
+    // Fresh session — reset the cumulative-final dedup tracker so previous
+    // dictations don't leak overlap matches into this one.
+    sessionEmittedTextRef.current = "";
     setListeningWithCallback(true);
     startRecognition();
     // Arm the idle watchdog once at the user-initiated start. The
