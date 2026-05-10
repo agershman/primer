@@ -152,13 +152,43 @@ describe("AudioPlayer: surfaces upstream error inline", () => {
     );
   });
 
-  it("renders the detail next to 'Audio unavailable' when present", async () => {
+  it("renders 'Audio unavailable' as a click-toggleable popover trigger with an info icon", async () => {
+    // Pre-fix the inline `Audio unavailable: <mono detail>` pattern
+    // truncated long upstream messages in narrow chat bubbles, and
+    // the affordance for "there is more detail here" was just a
+    // hover title that touch users couldn't see at all. The click-
+    // popover fixes both: the row stays uncluttered, the info-circle
+    // signals the affordance, and the full detail (or troubleshooting
+    // hints when no detail is available) renders in a floating panel.
     const src = await read("src/frontend/components/AudioPlayer.tsx");
+    // Trigger button — labelled "Audio unavailable" + ARIA popover
+    // attributes so assistive tech announces it correctly.
     expect(src).toMatch(
-      /Audio unavailable[\s\S]{0,200}errorDetail \?[\s\S]{0,200}font-mono[\s\S]{0,200}\{errorDetail\}/,
+      /<button[\s\S]{0,400}onClick=\{\(\) => setErrorOpen[\s\S]{0,400}aria-haspopup="dialog"[\s\S]{0,200}aria-expanded=\{errorOpen\}/,
     );
-    // Plus a hover-title with the same text so a long upstream
-    // message that gets truncated visually is still recoverable.
-    expect(src).toMatch(/title=\{errorDetail \?\? undefined\}/);
+    expect(src).toMatch(/<span>Audio unavailable<\/span>[\s\S]{0,100}<InfoCircleIcon \/>/);
+    // Popover content — the upstream detail when present, troubleshooting
+    // hints when not.
+    expect(src).toMatch(/role="dialog"[\s\S]{0,500}Couldn't play audio/);
+    expect(src).toMatch(/errorDetail \?[\s\S]{0,300}font-mono[\s\S]{0,200}\{errorDetail\}/);
+    expect(src).toMatch(/Common causes:/);
+  });
+
+  it("tracks an open/closed state for the error popover and clears it on src change", async () => {
+    const src = await read("src/frontend/components/AudioPlayer.tsx");
+    expect(src).toMatch(/const \[errorOpen, setErrorOpen\] = useState\(false\)/);
+    // Voice switch / retry resets BOTH the detail and the open state
+    // so a previous provider's popover doesn't stay pinned open after
+    // the user swapped to a different voice.
+    expect(src).toMatch(/useEffect\(\(\) => \{[\s\S]{0,500}setErrorOpen\(false\)[\s\S]{0,200}\}, \[src\]\)/);
+  });
+
+  it("dismisses the error popover on outside click and Escape", async () => {
+    const src = await read("src/frontend/components/AudioPlayer.tsx");
+    // Without these, a user who peeked at the upstream message has
+    // no obvious way to dismiss the popover — especially on touch
+    // devices where there's no Escape key.
+    expect(src).toMatch(/document\.addEventListener\("pointerdown"/);
+    expect(src).toMatch(/e\.key === "Escape"[\s\S]{0,80}setErrorOpen\(false\)/);
   });
 });
