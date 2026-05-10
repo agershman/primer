@@ -36,7 +36,10 @@ const COPY: Record<"about" | "focus", CopyTable> = {
  * Shared editor for About / Focus statements. Same UX on both:
  *
  *  - Textarea with continuous-mode dictation (mic + live interim)
- *  - "Refine with AI" button (Claude tightens the draft)
+ *  - "Refine with AI" button (Claude tightens the whole draft)
+ *  - "Refine with instruction" button (user types or dictates an
+ *    instruction like "shorter" or "add that I love TypeScript";
+ *    Claude applies that single edit and preserves the rest)
  *  - "Save as new version" button (creates a new versioned row)
  *  - Char count + "View history" link
  *
@@ -67,7 +70,10 @@ export function StatementPanel({ kind }: { kind: "about" | "focus" }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [interim, setInterim] = useState("");
   const [dictating, setDictating] = useState(false);
-  const [refineOpen, setRefineOpen] = useState(false);
+  // `null` = closed; otherwise the dialog opens in the named mode.
+  // Two entry points share the same dialog: the original "tighten my
+  // draft" flow and the instruction-driven flow ("apply this edit").
+  const [refineMode, setRefineMode] = useState<"tighten" | "instruction" | null>(null);
 
   // Resync the draft when the underlying statement changes (e.g.
   // restored from history elsewhere). Only when not actively dictating
@@ -157,12 +163,21 @@ export function StatementPanel({ kind }: { kind: "about" | "focus" }) {
         <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
-            onClick={() => setRefineOpen(true)}
+            onClick={() => setRefineMode("tighten")}
             disabled={saving || draft.trim().length < 10}
             className="shrink-0 px-2 py-1 rounded-md border border-border text-[11px] font-mono text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-50"
             title="Use AI to refine your draft into a tighter, prompt-ready paragraph"
           >
             ✨ Refine with AI
+          </button>
+          <button
+            type="button"
+            onClick={() => setRefineMode("instruction")}
+            disabled={saving || draft.trim().length < 10}
+            className="shrink-0 px-2 py-1 rounded-md border border-border text-[11px] font-mono text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-50"
+            title="Tell AI how to refine your draft (type or dictate an instruction)"
+          >
+            🎙 Refine with instruction
           </button>
           <button
             type="button"
@@ -194,14 +209,15 @@ export function StatementPanel({ kind }: { kind: "about" | "focus" }) {
         />
       )}
 
-      {refineOpen && (
+      {refineMode && (
         <RefineDialog
           kind={kind}
           draft={draft}
-          onCancel={() => setRefineOpen(false)}
+          mode={refineMode}
+          onCancel={() => setRefineMode(null)}
           onAccept={(refined) => {
             setDraft(refined);
-            setRefineOpen(false);
+            setRefineMode(null);
           }}
         />
       )}
