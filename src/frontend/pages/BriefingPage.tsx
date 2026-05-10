@@ -232,11 +232,7 @@ export function BriefingPage() {
   // show an explicit, intentional empty state.
   if (briefing && !isStillGenerating && pieces.length === 0) {
     return (
-      <NoContentState
-        date={briefingDate}
-        reason={briefing.noContentReason ?? "unknown"}
-        onRegenerate={generate}
-      />
+      <NoContentState date={briefingDate} reason={briefing.noContentReason ?? "unknown"} onRegenerate={generate} />
     );
   }
 
