@@ -100,6 +100,24 @@ export function useBriefing(date?: string): UseBriefingResult {
     };
   }, [fetchBriefing]);
 
+  // Mobile browsers (iOS Safari especially) tear down in-flight
+  // fetches when the page is backgrounded. The `generate()` call is a
+  // long-lived stream that resolves only when generation finishes, so
+  // app-switching mid-generation causes its await to reject with a
+  // network-level `TypeError: Failed to fetch` — leaving the UI stuck
+  // on an error banner even though the worker is still happily
+  // generating (or already finished). Re-fetching when the tab
+  // becomes visible again resyncs to the real server state, which is
+  // the same recovery the user gets by hard-refreshing the page.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVis = () => {
+      if (document.visibilityState === "visible") fetchBriefing();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [fetchBriefing]);
+
   const pollStatus = useCallback(async () => {
     try {
       const [status, briefingData] = await Promise.all([
