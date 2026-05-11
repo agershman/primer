@@ -74,8 +74,12 @@ analyticsRoutes.get("/analytics/briefings", async (c) => {
 
   const byBriefing = new Map<string, TimingRow[]>();
   for (const t of timings.results) {
-    if (!byBriefing.has(t.briefing_id)) byBriefing.set(t.briefing_id, []);
-    byBriefing.get(t.briefing_id)!.push(t);
+    let bucket = byBriefing.get(t.briefing_id);
+    if (!bucket) {
+      bucket = [];
+      byBriefing.set(t.briefing_id, bucket);
+    }
+    bucket.push(t);
   }
 
   return c.json({
@@ -145,16 +149,17 @@ analyticsRoutes.get("/analytics/performance", async (c) => {
   >();
   for (const r of rows.results) {
     const key = `${r.step_key}::${r.model_used ?? ""}`;
-    if (!buckets.has(key)) {
-      buckets.set(key, {
+    let b = buckets.get(key);
+    if (!b) {
+      b = {
         stepKey: r.step_key,
         modelUsed: r.model_used,
         durations: [],
         itemsTotal: 0,
         runs: 0,
-      });
+      };
+      buckets.set(key, b);
     }
-    const b = buckets.get(key)!;
     b.durations.push(r.duration_ms);
     b.itemsTotal += r.items_processed ?? 0;
     b.runs += 1;
@@ -348,13 +353,7 @@ analyticsRoutes.get("/analytics/learning", async (c) => {
       confidence: m.confidence ?? 0,
       delta: m.baseline != null ? (m.depth_score ?? 0) - m.baseline : null,
     }))
-    .filter((m) => m.delta !== null && Math.abs(m.delta!) > 0.001) as Array<{
-    id: string;
-    name: string;
-    currentDepth: number;
-    confidence: number;
-    delta: number;
-  }>;
+    .filter((m): m is typeof m & { delta: number } => m.delta !== null && Math.abs(m.delta) > 0.001);
 
   moversWithDelta.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 
@@ -649,7 +648,10 @@ analyticsRoutes.get("/analytics/budget", async (c) => {
     }>();
 
   let spend = 0;
-  const byOperation = new Map<string, { operation: string; modality: "text" | "tts"; costUsd: number; calls: number }>();
+  const byOperation = new Map<
+    string,
+    { operation: string; modality: "text" | "tts"; costUsd: number; calls: number }
+  >();
   const byProvider = new Map<string, { provider: string; costUsd: number; calls: number }>();
 
   for (const r of rows.results) {

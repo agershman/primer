@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useBudgetUsage, type BudgetUsageData } from "../../../hooks/useBudgetUsage";
+import { type BudgetUsageData, useBudgetUsage } from "../../../hooks/useBudgetUsage";
 import { fmtUsd, operationLabel } from "../../usage-format";
 import { useSettingsCtx } from "../SettingsContext";
 import { Card, Field, PanelHeader } from "../shared";
@@ -109,19 +109,12 @@ function BudgetUsageSection({
   // Bar fill colour: green-zone accent until 75%, warning hue
   // 75–99%, red at/over the cap. Mirrors how mobile battery
   // indicators darken as you approach empty.
-  const barFillClass = exceeded
-    ? "bg-negative"
-    : ratio >= 0.75
-      ? "bg-warning"
-      : "bg-accent";
+  const barFillClass = exceeded ? "bg-negative" : ratio >= 0.75 ? "bg-warning" : "bg-accent";
 
   return (
     <div className="mb-3">
       {exceeded && (
-        <div
-          role="alert"
-          className="mb-3 rounded-md bg-negative-dim border border-negative/30 px-3 py-2.5"
-        >
+        <div role="alert" className="mb-3 rounded-md bg-negative-dim border border-negative/30 px-3 py-2.5">
           <div className="text-[11px] font-semibold text-negative">Generation halted</div>
           <div className="mt-0.5 text-[10px] font-mono text-negative/90 leading-relaxed">
             You've reached your ${cap} monthly cap. Briefings resume next month, or raise the cap below to unblock now.
@@ -180,13 +173,7 @@ function providerLabel(p: string): string {
  * of the cap, so the rows visually add to 100% regardless of how
  * far through the budget they are.
  */
-function OperationBreakdown({
-  rows,
-  totalSpend,
-}: {
-  rows: BudgetUsageData["byOperation"];
-  totalSpend: number;
-}) {
+function OperationBreakdown({ rows, totalSpend }: { rows: BudgetUsageData["byOperation"]; totalSpend: number }) {
   const TOP_LIMIT = 5;
   const [expanded, setExpanded] = useState(false);
   const sorted = rows.filter((r) => r.costUsd > 0);
@@ -210,10 +197,7 @@ function OperationBreakdown({
                 </span>
               </div>
               <div className="mt-1 h-1 w-full rounded-full bg-surface-active overflow-hidden">
-                <div
-                  className="h-full bg-accent/70"
-                  style={{ width: `${Math.min(100, Math.max(0, share * 100))}%` }}
-                />
+                <div className="h-full bg-accent/70" style={{ width: `${Math.min(100, Math.max(0, share * 100))}%` }} />
               </div>
             </div>
           );
@@ -246,8 +230,7 @@ function ProviderSummary({ rows }: { rows: BudgetUsageData["byProvider"] }) {
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-mono">
         {nonZero.map((r) => (
           <span key={r.provider} className="text-text-secondary">
-            {providerLabel(r.provider)}{" "}
-            <span className="text-text-primary tabular-nums">{fmtUsd(r.costUsd)}</span>
+            {providerLabel(r.provider)} <span className="text-text-primary tabular-nums">{fmtUsd(r.costUsd)}</span>
           </span>
         ))}
       </div>

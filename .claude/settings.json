@@ -7,10 +7,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run check 1>&2 || exit 2",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/pre-push-check.sh",
             "if": "Bash(git push *)",
             "timeout": 180,
-            "statusMessage": "Running bun run check before push…"
+            "statusMessage": "Linting changed files + typechecking before push…"
           }
         ]
       }
