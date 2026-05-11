@@ -190,7 +190,14 @@ export function BriefingPage() {
 
   if (loading) return <LoadingState />;
 
-  if (error) {
+  // Only short-circuit on error if we have nothing else to show.
+  // When a previous briefing is in state (common when a Refresh-then-
+  // background-on-mobile tears down the long-lived generate stream and
+  // its await rejects), we'd rather render the stale content than wipe
+  // the page. The visibilitychange + online handlers in useBriefing
+  // refetch in the background, so this banner clears on its own once
+  // connectivity recovers.
+  if (error && !briefing) {
     return (
       <div className="animate-fade-in">
         <div className="rounded-lg border border-negative-dim bg-negative-dim/30 p-4">
@@ -238,6 +245,11 @@ export function BriefingPage() {
 
   return (
     <div className="animate-fade-in">
+      {error && (
+        <div className="rounded-lg border border-warning-dim bg-warning-dim/30 px-4 py-3 mb-6">
+          <p className="font-ui text-sm text-warning">Reconnecting… showing your last loaded briefing.</p>
+        </div>
+      )}
       {briefing?.status === "partial" && !isStillGenerating && (
         <div className="rounded-lg border border-warning-dim bg-warning-dim/30 px-4 py-3 mb-6">
           <p className="font-ui text-sm text-warning">

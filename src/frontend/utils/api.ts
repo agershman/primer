@@ -74,12 +74,29 @@ function resolvePath(path: string): string {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(resolvePath(path), { headers: authHeaders() });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API ${res.status}: ${text}`);
+  // Retry network-level failures (TypeError from fetch — DNS, dropped
+  // connection, mobile browser tearing down an in-flight request when
+  // the page backgrounds). GET is safe to retry; the worker is the
+  // source of truth, so a second attempt just re-reads. POSTs are
+  // intentionally not retried here — non-idempotent side effects.
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(resolvePath(path), { headers: authHeaders() });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`API ${res.status}: ${text}`);
+      }
+      return res.json() as Promise<T>;
+    } catch (err) {
+      if (err instanceof TypeError && attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
   }
-  return res.json() as Promise<T>;
+  throw new Error("Request failed after retries");
 }
 
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
