@@ -106,16 +106,30 @@ export function useBriefing(date?: string): UseBriefingResult {
   // app-switching mid-generation causes its await to reject with a
   // network-level `TypeError: Failed to fetch` — leaving the UI stuck
   // on an error banner even though the worker is still happily
-  // generating (or already finished). Re-fetching when the tab
-  // becomes visible again resyncs to the real server state, which is
-  // the same recovery the user gets by hard-refreshing the page.
+  // generating (or already finished).
+  //
+  // Recovery: re-fetch when the tab becomes visible again AND when
+  // the network reports back online. We listen to both because the
+  // visibilitychange event fires the moment the page resumes — often
+  // before the mobile network stack has actually finished reconnecting
+  // — so the first refetch attempt can itself fail with the same
+  // TypeError. The `online` event fires once connectivity is real, and
+  // `apiGet` retries TypeErrors internally as a final safety net.
   useEffect(() => {
     if (typeof document === "undefined") return;
+    const refresh = () => {
+      setError((prev) => (prev ? null : prev));
+      fetchBriefing();
+    };
     const onVis = () => {
-      if (document.visibilityState === "visible") fetchBriefing();
+      if (document.visibilityState === "visible") refresh();
     };
     document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
+    window.addEventListener("online", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("online", refresh);
+    };
   }, [fetchBriefing]);
 
   const pollStatus = useCallback(async () => {
