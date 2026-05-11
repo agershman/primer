@@ -74,8 +74,12 @@ analyticsRoutes.get("/analytics/briefings", async (c) => {
 
   const byBriefing = new Map<string, TimingRow[]>();
   for (const t of timings.results) {
-    if (!byBriefing.has(t.briefing_id)) byBriefing.set(t.briefing_id, []);
-    byBriefing.get(t.briefing_id)!.push(t);
+    let bucket = byBriefing.get(t.briefing_id);
+    if (!bucket) {
+      bucket = [];
+      byBriefing.set(t.briefing_id, bucket);
+    }
+    bucket.push(t);
   }
 
   return c.json({
@@ -145,16 +149,17 @@ analyticsRoutes.get("/analytics/performance", async (c) => {
   >();
   for (const r of rows.results) {
     const key = `${r.step_key}::${r.model_used ?? ""}`;
-    if (!buckets.has(key)) {
-      buckets.set(key, {
+    let b = buckets.get(key);
+    if (!b) {
+      b = {
         stepKey: r.step_key,
         modelUsed: r.model_used,
         durations: [],
         itemsTotal: 0,
         runs: 0,
-      });
+      };
+      buckets.set(key, b);
     }
-    const b = buckets.get(key)!;
     b.durations.push(r.duration_ms);
     b.itemsTotal += r.items_processed ?? 0;
     b.runs += 1;
@@ -348,13 +353,7 @@ analyticsRoutes.get("/analytics/learning", async (c) => {
       confidence: m.confidence ?? 0,
       delta: m.baseline != null ? (m.depth_score ?? 0) - m.baseline : null,
     }))
-    .filter((m) => m.delta !== null && Math.abs(m.delta!) > 0.001) as Array<{
-    id: string;
-    name: string;
-    currentDepth: number;
-    confidence: number;
-    delta: number;
-  }>;
+    .filter((m): m is typeof m & { delta: number } => m.delta !== null && Math.abs(m.delta) > 0.001);
 
   moversWithDelta.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 
@@ -606,5 +605,89 @@ analyticsRoutes.get("/analytics/usage", async (c) => {
     byDay: Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day)),
     currentTtsCharsInWindow,
     ttsCatalog,
+  });
+});
+
+/**
+ * GET /api/analytics/budget
+ *
+ * Month-to-date spend vs. the user's monthly cap, plus the
+ * "battery usage"–style breakdown of which use cases and providers
+ * have contributed the most. Scoped to the calendar month (start of
+ * month → now) so the numbers shown line up exactly with what
+ * `isBudgetExceeded()` checks against when halting generation.
+ *
+ * Unlike `/analytics/usage` (window of last N days, multi-dimensional
+ * cuts for the analytics page), this endpoint is shaped for a tight
+ * settings-panel display: one number per use case and provider, no
+ * token counts, no daily series.
+ */
+analyticsRoutes.get("/analytics/budget", async (c) => {
+  const user = c.get("user");
+  const cap = user.settings.budgetCapMonthly ?? 35;
+
+  // Group by every dimension we care about in this view. The
+  // calendar-month boundary mirrors `getMonthlySpend()` so the
+  // total here equals the value `isBudgetExceeded()` compares.
+  const rows = await c.env.DB.prepare(
+    `SELECT operation, modality, provider,
+            COUNT(*) as calls,
+            SUM(estimated_cost_usd) as cost_usd
+     FROM usage_events
+     WHERE user_id = ?
+       AND created_at >= datetime('now', 'start of month')
+     GROUP BY operation, modality, provider`,
+  )
+    .bind(user.userId)
+    .all<{
+      operation: string;
+      modality: "text" | "tts";
+      provider: string;
+      calls: number;
+      cost_usd: number | null;
+    }>();
+
+  let spend = 0;
+  const byOperation = new Map<
+    string,
+    { operation: string; modality: "text" | "tts"; costUsd: number; calls: number }
+  >();
+  const byProvider = new Map<string, { provider: string; costUsd: number; calls: number }>();
+
+  for (const r of rows.results) {
+    const cost = r.cost_usd ?? 0;
+    spend += cost;
+
+    const opKey = `${r.operation}::${r.modality}`;
+    const opBucket = byOperation.get(opKey) ?? {
+      operation: r.operation,
+      modality: r.modality,
+      costUsd: 0,
+      calls: 0,
+    };
+    opBucket.costUsd += cost;
+    opBucket.calls += r.calls;
+    byOperation.set(opKey, opBucket);
+
+    const provBucket = byProvider.get(r.provider) ?? { provider: r.provider, costUsd: 0, calls: 0 };
+    provBucket.costUsd += cost;
+    provBucket.calls += r.calls;
+    byProvider.set(r.provider, provBucket);
+  }
+
+  const sortByCost = <T extends { costUsd: number }>(arr: T[]): T[] => arr.sort((a, b) => b.costUsd - a.costUsd);
+
+  // First day of the current month in UTC, ISO-formatted. Matches
+  // SQLite's `datetime('now', 'start of month')` semantics so the
+  // client can render "since May 1" labels without re-deriving.
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+
+  return c.json({
+    cap,
+    spend,
+    monthStart,
+    byOperation: sortByCost(Array.from(byOperation.values())),
+    byProvider: sortByCost(Array.from(byProvider.values())),
   });
 });
