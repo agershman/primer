@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { UsageData, UsageMetrics } from "../hooks/useAnalytics";
 import { Bars } from "./Trendline";
+import { fmtUsd, operationLabel } from "./usage-format";
 
 /**
  * Token + audio-character usage breakdown.
@@ -23,28 +24,6 @@ import { Bars } from "./Trendline";
  * synthetic).
  */
 
-const OPERATION_LABELS: Record<string, string> = {
-  // LLM operations.
-  concept_extraction: "Extract concepts",
-  teaching_generation: "Write teaching pieces",
-  deep_dive: "Generate deep dives",
-  quiz_generation: "Generate quiz questions",
-  quiz_assessment: "Assess quiz answers",
-  source_suggestion: "Suggest sources",
-  slack_filter: "Filter Slack messages",
-  continuation: "Continuation classifier",
-  chat: "Chat reply",
-  chat_title: "Chat thread title",
-  // TTS operations.
-  audio_teaching_piece: "Listen — teaching piece",
-  audio_deep_dive: "Listen — deep dive",
-  audio_chat_reply: "Listen — chat reply",
-};
-
-function operationLabel(op: string): string {
-  return OPERATION_LABELS[op] ?? op;
-}
-
 function fmtTokens(n: number): string {
   if (n === 0) return "—";
   if (n < 1000) return String(n);
@@ -57,12 +36,6 @@ function fmtChars(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
   return `${(n / 1_000_000).toFixed(2)}M`;
-}
-
-function fmtUsd(n: number): string {
-  if (n === 0) return "$0";
-  if (n < 0.01) return "<$0.01";
-  return `$${n.toFixed(2)}`;
 }
 
 interface UsageBreakdownProps {
