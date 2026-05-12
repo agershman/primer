@@ -82,7 +82,12 @@ describe("piece routes — source code contracts", () => {
       // Notification creation lives behind the claim, so only the
       // request that won the race spawns a bell row.
       const claimIdx = src.indexOf("claim.meta?.changes");
-      const notificationIdx = src.indexOf('kind: "deep_dive"');
+      // Use the trailing comma to disambiguate the actual
+      // createNotification({ kind: "deep_dive", ... }) call site from
+      // unrelated occurrences of the string `kind: "deep_dive"` inside
+      // the polymorphic `target_kind: "deep_dive" as const` literals in
+      // sibling files like `routes/pieces/audit.ts`.
+      const notificationIdx = src.indexOf('kind: "deep_dive",');
       expect(claimIdx).toBeGreaterThan(0);
       expect(notificationIdx).toBeGreaterThan(claimIdx);
     });

@@ -8,12 +8,7 @@
 // (the `TeachingPieceData.content` and `QuizAssessmentData.learningPath`
 // fields reference them as types) — re-exports alone don't bring a
 // name into local scope, only into the consumers' module scope.
-import type {
-  AuditSummary,
-  AuditTrail,
-  ContentBlock,
-  Resource,
-} from "../shared/types";
+import type { AuditSummary, AuditTrail, ContentBlock, Resource } from "../shared/types";
 
 export type {
   AuditClaim,

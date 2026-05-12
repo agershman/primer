@@ -63,9 +63,7 @@ function renderTextWithAuditMarks(
     if (start > cursor) {
       out.push(...parseInlineMarkup(text.slice(cursor, start)));
     }
-    const verdictClass = r.patched
-      ? "audit-mark-patched"
-      : `audit-mark-${r.verdict}`;
+    const verdictClass = r.patched ? "audit-mark-patched" : `audit-mark-${r.verdict}`;
     out.push(
       <span
         key={`mark-${key++}-${r.claimId}`}
@@ -572,13 +570,7 @@ export function CodeBlock({ value, language }: { value: string; language?: strin
   );
 }
 
-export function RichText({
-  blocks,
-  bookmarkedBlock,
-  onBookmarkBlock,
-  highlightedRanges,
-  auditTarget,
-}: RichTextProps) {
+export function RichText({ blocks, bookmarkedBlock, onBookmarkBlock, highlightedRanges, auditTarget }: RichTextProps) {
   return (
     <div className="space-y-3">
       {blocks.map((block, i) => {

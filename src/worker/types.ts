@@ -167,8 +167,6 @@ export interface UserContext {
 // `from "../types"`) keep working without a tree-wide rewrite, and
 // so adding a new resource type in one place actually changes both
 // sides at type-check time.
-export type { ContentBlock, Resource } from "../shared/types";
-
 // Audit shapes — same rationale as ContentBlock / Resource above. Live
 // in the shared module because they cross the wire on
 // `GET /api/.../audit` and (as inline summaries) on every briefing
@@ -180,5 +178,7 @@ export type {
   AuditTargetKind,
   AuditTrail,
   AuditVerdict,
+  ContentBlock,
+  Resource,
   WebEvidence,
 } from "../shared/types";

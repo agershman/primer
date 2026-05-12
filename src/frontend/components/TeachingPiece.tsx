@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AdminOnly } from "../hooks/useCurrentUser";
 import { onPrimerEvent } from "../lib/events";
-import type { PieceSeriesPart, PieceSeriesResponse, SourceDescriptor, TeachingPieceData } from "../types";
+import type { AuditTrail, PieceSeriesPart, PieceSeriesResponse, SourceDescriptor, TeachingPieceData } from "../types";
 import { apiGet, apiPost } from "../utils/api";
 import { contentBlocksToSpokenText, estimateTtsDurationSeconds } from "../utils/audioEstimate";
 import { cleanSlackText } from "../utils/text";
 import { AudioPlayer } from "./AudioPlayer";
+import { AuditIndicator } from "./AuditIndicator";
+import { AuditPopover } from "./AuditPopover";
+import { AuditTrailPanel } from "./AuditTrailPanel";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { DepthIndicator } from "./DepthIndicator";
 import { FeedbackButtons } from "./FeedbackButtons";
 import { ResourceList } from "./ResourceList";
+import type { AuditHighlightRange } from "./RichText";
 import { RichText } from "./RichText";
 import { VoiceSwitcher } from "./VoiceSwitcher";
 
@@ -119,6 +123,67 @@ export function TeachingPiece({
   const badge = SOURCE_TYPE_BADGES[piece.source_type] ?? SOURCE_TYPE_BADGES["current-work"];
   const sources = piece.source_context ?? [];
 
+  // ── Audit surface state ──
+  // Inline marks visibility defaults to ON; per-piece toggle from
+  // the AuditIndicator dropdown overrides via the typed event bus.
+  // A future Settings → "Show audit marks inline" toggle will seed
+  // a global default by reading user_settings.show_audit_marks.
+  const [marksVisible, setMarksVisible] = useState(true);
+  useEffect(
+    () =>
+      onPrimerEvent("audit-marks-visibility-changed", (detail) => {
+        if (detail.targetKind !== "piece" || detail.targetId !== piece.id) return;
+        setMarksVisible(detail.visible);
+      }),
+    [piece.id],
+  );
+
+  // Lazy-loaded full audit trail. Populated when the panel opens OR
+  // when a wavy underline is clicked; cached in component state so
+  // both surfaces share one fetch.
+  const [auditTrail, setAuditTrail] = useState<AuditTrail | null>(null);
+  const [auditPanelOpen, setAuditPanelOpen] = useState(false);
+  useEffect(() => {
+    if (!marksVisible || auditTrail) return;
+    if (!piece.audit_summary) return;
+    let cancelled = false;
+    apiGet<AuditTrail>(`/api/piece/${piece.id}/audit`)
+      .then((data) => {
+        if (!cancelled) setAuditTrail(data);
+      })
+      .catch(() => {
+        /* keep marks hidden if the trail fetch fails — the indicator pill stays informative */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [marksVisible, auditTrail, piece.id, piece.audit_summary]);
+
+  // Translate the trail into per-block highlight ranges for RichText.
+  const highlightedRanges = useMemo(() => {
+    if (!marksVisible || !auditTrail) return null;
+    const out: Record<number, AuditHighlightRange[]> = {};
+    // Use the LATEST pass per claim so post-patch verdicts win. The
+    // panel UI keeps both passes for the audit trail view; the
+    // inline marks should reflect the final state.
+    const lastPass = auditTrail.passes[auditTrail.passes.length - 1];
+    if (!lastPass) return null;
+    for (const claim of lastPass.claims) {
+      if (claim.verdict === "grounded") continue; // no mark for clean spans
+      if (claim.resolution === "dropped") continue; // dropped spans are no longer in the rendered text
+      const list = out[claim.block_index] ?? [];
+      list.push({
+        start: claim.span_start,
+        end: claim.span_end,
+        verdict: claim.verdict,
+        claimId: claim.id,
+        patched: claim.resolution === "patched",
+      });
+      out[claim.block_index] = list;
+    }
+    return out;
+  }, [auditTrail, marksVisible]);
+
   return (
     <article id={`piece-${piece.id}`} className="py-6 first:pt-0 scroll-mt-24">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-2">
@@ -156,6 +221,23 @@ export function TeachingPiece({
                 <path d="M3 1h6a1 1 0 011 1v9l-4-2.5L2 11V2a1 1 0 011-1z" />
               </svg>
             </button>
+          </>
+        )}
+        {/* Audit indicator — rolls up the pass-1 audit verdict
+            into a small pill. Clicking opens a dropdown with the
+            "Show audit marks" toggle + "View full audit trail"
+            entry. Renders nothing when the piece pre-dates the
+            audit feature (audit_summary is undefined). */}
+        {piece.audit_summary && (
+          <>
+            <span className="text-text-faint">·</span>
+            <AuditIndicator
+              audit={piece.audit_summary}
+              targetKind="piece"
+              targetId={piece.id}
+              marksVisible={marksVisible}
+              onOpenPanel={() => setAuditPanelOpen(true)}
+            />
           </>
         )}
         {/* Due-date pill — surfaces time-pressure at a glance. The
@@ -241,8 +323,23 @@ export function TeachingPiece({
           blocks={piece.content}
           bookmarkedBlock={bookmarkedBlock}
           onBookmarkBlock={onBookmarkBlock ? (blockIdx) => onBookmarkBlock(piece.id, blockIdx) : undefined}
+          highlightedRanges={highlightedRanges}
+          auditTarget={{ kind: "piece", id: piece.id }}
         />
       </div>
+
+      {/* Floating popover for clicked audit marks + opt-in full
+          trail modal. Both share the lazily-fetched `auditTrail`. */}
+      <AuditPopover targetKind="piece" targetId={piece.id} trail={auditTrail} sources={sources} />
+      <AuditTrailPanel
+        open={auditPanelOpen}
+        onClose={() => setAuditPanelOpen(false)}
+        targetKind="piece"
+        targetId={piece.id}
+        preloadedTrail={auditTrail}
+        sources={sources}
+        onTrailLoaded={(t) => setAuditTrail(t)}
+      />
 
       {piece.resources.length > 0 && (
         <div className="mb-4">

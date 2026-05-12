@@ -12,8 +12,7 @@
  */
 
 import { Hono } from "hono";
-import type { Env, UserContext } from "../../types.js";
-import type { AuditClaim, AuditResolution, AuditVerdict, WebEvidence } from "../../types.js";
+import type { AuditClaim, AuditResolution, AuditVerdict, Env, UserContext, WebEvidence } from "../../types.js";
 
 type AppEnv = { Bindings: Env; Variables: { user: UserContext } };
 
@@ -23,8 +22,7 @@ quizAuditRoutes.get("/quiz/:id/audit", async (c) => {
   const user = c.get("user");
   const quizId = c.req.param("id");
 
-  const owns = await c.env.DB
-    .prepare("SELECT id FROM calibration_quizzes WHERE id = ? AND user_id = ?")
+  const owns = await c.env.DB.prepare("SELECT id FROM calibration_quizzes WHERE id = ? AND user_id = ?")
     .bind(quizId, user.userId)
     .first<{ id: string }>();
   if (!owns) return c.json({ error: "Quiz not found" }, 404);
@@ -44,15 +42,14 @@ quizAuditRoutes.get("/quiz/:id/audit", async (c) => {
     dropped_count: number;
   }
 
-  const audits = await c.env.DB
-    .prepare(
-      `SELECT id, pass, status, audit_model, patch_model, used_web_search,
+  const audits = await c.env.DB.prepare(
+    `SELECT id, pass, status, audit_model, patch_model, used_web_search,
               total_claims, unsupported_count, hallucinated_count, grounded_web_count,
               patched_count, dropped_count
        FROM audits
        WHERE user_id = ? AND target_kind = 'quiz' AND target_id = ?
        ORDER BY pass ASC`,
-    )
+  )
     .bind(user.userId, quizId)
     .all<AuditRow>();
 
@@ -76,14 +73,13 @@ quizAuditRoutes.get("/quiz/:id/audit", async (c) => {
     resolution: AuditResolution | null;
     patched_text: string | null;
   }
-  const claims = await c.env.DB
-    .prepare(
-      `SELECT id, audit_id, block_index, span_start, span_end, claim_text, verdict,
+  const claims = await c.env.DB.prepare(
+    `SELECT id, audit_id, block_index, span_start, span_end, claim_text, verdict,
               cited_refs, web_evidence, reasoning, resolution, patched_text
        FROM audit_claims
        WHERE audit_id IN (${placeholders})
        ORDER BY block_index ASC, span_start ASC`,
-    )
+  )
     .bind(...auditIds)
     .all<ClaimRow>();
 

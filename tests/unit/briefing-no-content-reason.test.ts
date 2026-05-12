@@ -95,7 +95,19 @@ class FakeD1 {
           },
 
           async all<T>(): Promise<{ results: T[] }> {
-            if (normalized.startsWith("SELECT * FROM teaching_pieces WHERE briefing_id = ? ORDER BY position DESC")) {
+            // Accept the new audit-aware SELECT shape (LEFT JOIN
+            // audits a_piece / a_dd) as well as the legacy
+            // `SELECT * FROM teaching_pieces ...`. The piece set is
+            // the same either way; the audit columns are absent in
+            // this fake DB and the route's buildAuditSummary helper
+            // produces null for them, which is exactly the "no audit
+            // yet" branch the no-content-reason tests want.
+            if (
+              normalized.includes("FROM teaching_pieces") &&
+              normalized.includes("briefing_id") &&
+              normalized.includes("ORDER BY") &&
+              normalized.includes("position")
+            ) {
               const [briefingId] = params as [string];
               const results = db.pieces
                 .filter((p) => p.briefing_id === briefingId)

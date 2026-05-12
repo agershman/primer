@@ -16,8 +16,15 @@
  */
 
 import { Hono } from "hono";
-import type { Env, UserContext } from "../../types.js";
-import type { AuditClaim, AuditResolution, AuditTrail, AuditVerdict, WebEvidence } from "../../types.js";
+import type {
+  AuditClaim,
+  AuditResolution,
+  AuditTrail,
+  AuditVerdict,
+  Env,
+  UserContext,
+  WebEvidence,
+} from "../../types.js";
 
 type AppEnv = { Bindings: Env; Variables: { user: UserContext } };
 
@@ -148,8 +155,7 @@ pieceAuditRoutes.get("/piece/:id/audit", async (c) => {
   // Cheap existence + ownership check before loading the trail.
   // Returns 404 even if the piece exists but belongs to another user
   // — leaks nothing about whether the id exists at all.
-  const owns = await c.env.DB
-    .prepare("SELECT id FROM teaching_pieces WHERE id = ? AND user_id = ?")
+  const owns = await c.env.DB.prepare("SELECT id FROM teaching_pieces WHERE id = ? AND user_id = ?")
     .bind(pieceId, user.userId)
     .first<{ id: string }>();
   if (!owns) return c.json({ error: "Piece not found" }, 404);
@@ -172,8 +178,7 @@ pieceAuditRoutes.get("/piece/:id/audit", async (c) => {
 pieceAuditRoutes.get("/piece/:id/deep-dive/audit", async (c) => {
   const user = c.get("user");
   const pieceId = c.req.param("id");
-  const owns = await c.env.DB
-    .prepare("SELECT id FROM teaching_pieces WHERE id = ? AND user_id = ?")
+  const owns = await c.env.DB.prepare("SELECT id FROM teaching_pieces WHERE id = ? AND user_id = ?")
     .bind(pieceId, user.userId)
     .first<{ id: string }>();
   if (!owns) return c.json({ error: "Piece not found" }, 404);

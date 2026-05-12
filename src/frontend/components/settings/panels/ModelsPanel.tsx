@@ -22,6 +22,16 @@ const MODEL_OPERATIONS: Array<{ key: string; label: string; desc: string }> = [
     label: "Continuation classifier",
     desc: "Decides if a draft is novel, a continuation, or redundant",
   },
+  {
+    key: "audit",
+    label: "Audit",
+    desc: "Classifies factual claims after generation; flags hallucinations and patches/drops them",
+  },
+  {
+    key: "auditPatch",
+    label: "Audit patch",
+    desc: "Rewrites flagged claims into defensible form (defaults to the teaching-piece model for voice consistency)",
+  },
 ];
 
 // Provider ordering for the optgroup. Listed broadly enough that

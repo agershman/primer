@@ -222,7 +222,9 @@ Content can include code blocks (type "code" with a language) and mermaid diagra
     })
     .filter((line): line is string => line !== null);
   if (allowedRefs.length > 0) {
-    sourceContextLines.push(`Allowed [[ref:...]] IDs (use any sentence-tag verbatim from this list, no others):\n${allowedRefs.join("\n")}`);
+    sourceContextLines.push(
+      `Allowed [[ref:...]] IDs (use any sentence-tag verbatim from this list, no others):\n${allowedRefs.join("\n")}`,
+    );
   }
 
   const userMessage = `Write a ${pieceType} teaching piece about "${target.conceptName}" (category: ${target.category ?? "general"}).

@@ -31,6 +31,8 @@
  */
 
 import { genId, recordTokenUsage } from "../db/queries.js";
+import type { LLMClient, ModelSpec } from "../integrations/llm/types.js";
+import { checkClaimWithWebSearch, supportsWebSearch } from "../integrations/web-search.js";
 import type {
   AuditClaim,
   AuditResolution,
@@ -41,8 +43,6 @@ import type {
   ContentBlock,
   WebEvidence,
 } from "../types.js";
-import { checkClaimWithWebSearch, supportsWebSearch } from "../integrations/web-search.js";
-import type { LLMClient, ModelSpec } from "../integrations/llm/types.js";
 
 /**
  * Subset of `SourceDescriptor` the auditor actually needs. Kept narrow
@@ -252,7 +252,7 @@ async function patchClaim(
     sources_summary: summarizeSourcesForPrompt(sources),
     web_evidence: webEvidence ?? [],
     response_schema: {
-      decision: 'rewrite | drop',
+      decision: "rewrite | drop",
       text: 'new text for the span (only if decision="rewrite")',
     },
   });
@@ -587,12 +587,11 @@ export async function auditContent(args: AuditContentArgs): Promise<AuditContent
       finalClaims.push({ ...c, resolution: "kept" });
     }
 
-    const passOneStatus: AuditSummary["status"] =
-      finalClaims.some((c) => c.resolution === "dropped")
-        ? "dropped"
-        : finalClaims.some((c) => c.resolution === "patched")
-          ? "patched"
-          : "clean";
+    const passOneStatus: AuditSummary["status"] = finalClaims.some((c) => c.resolution === "dropped")
+      ? "dropped"
+      : finalClaims.some((c) => c.resolution === "patched")
+        ? "patched"
+        : "clean";
 
     const passOneSummary = summaryFromClaims(
       passOneStatus,
@@ -672,13 +671,7 @@ export async function auditContent(args: AuditContentArgs): Promise<AuditContent
           ? "dropped"
           : "clean";
 
-        const passTwoSummary = summaryFromClaims(
-          passTwoStatus,
-          finalPassTwoClaims,
-          args.auditSpec.model,
-          null,
-          false,
-        );
+        const passTwoSummary = summaryFromClaims(passTwoStatus, finalPassTwoClaims, args.auditSpec.model, null, false);
         await persistAudit(args.db, {
           userId: args.userId,
           targetKind: args.targetKind,

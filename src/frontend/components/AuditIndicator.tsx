@@ -16,8 +16,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AuditSummary } from "../types";
 import { dispatchPrimerEvent } from "../lib/events";
+import type { AuditSummary } from "../types";
 
 interface AuditIndicatorProps {
   audit: AuditSummary | null | undefined;

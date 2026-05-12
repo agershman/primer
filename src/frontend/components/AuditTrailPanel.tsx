@@ -107,19 +107,18 @@ export function AuditTrailPanel({
       aria-label="Audit trail"
       className="fixed inset-0 z-40 flex items-center justify-center bg-black/40"
       onClick={onClose}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
     >
       <div
         className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-surface p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-text-primary">Audit trail</h2>
-          <button
-            type="button"
-            className="text-text-dim hover:text-text-primary"
-            onClick={onClose}
-            aria-label="Close"
-          >
+          <button type="button" className="text-text-dim hover:text-text-primary" onClick={onClose} aria-label="Close">
             ✕
           </button>
         </div>
@@ -127,23 +126,25 @@ export function AuditTrailPanel({
         {loading ? <p className="text-text-dim">Loading audit details…</p> : null}
         {error ? <p className="text-negative">Could not load audit trail: {error}</p> : null}
 
-        {trail
-          ? trail.passes.length === 0
-            ? <p className="text-text-dim">No audit ran on this content. It may pre-date the audit feature.</p>
-            : trail.passes.map((pass) => (
-                <section key={pass.pass} className="mb-6">
-                  <h3 className="mb-2 text-sm font-medium text-text-secondary">
-                    Pass {pass.pass} · {pass.summary.status} ·{" "}
-                    {pass.summary.total_claims} {pass.summary.total_claims === 1 ? "claim" : "claims"}
-                  </h3>
-                  <ul className="space-y-3">
-                    {pass.claims.map((c) => (
-                      <ClaimRow key={c.id} claim={c} sources={sources} />
-                    ))}
-                  </ul>
-                </section>
-              ))
-          : null}
+        {trail ? (
+          trail.passes.length === 0 ? (
+            <p className="text-text-dim">No audit ran on this content. It may pre-date the audit feature.</p>
+          ) : (
+            trail.passes.map((pass) => (
+              <section key={pass.pass} className="mb-6">
+                <h3 className="mb-2 text-sm font-medium text-text-secondary">
+                  Pass {pass.pass} · {pass.summary.status} · {pass.summary.total_claims}{" "}
+                  {pass.summary.total_claims === 1 ? "claim" : "claims"}
+                </h3>
+                <ul className="space-y-3">
+                  {pass.claims.map((c) => (
+                    <ClaimRow key={c.id} claim={c} sources={sources} />
+                  ))}
+                </ul>
+              </section>
+            ))
+          )
+        ) : null}
       </div>
     </div>
   );
@@ -156,9 +157,7 @@ function ClaimRow({ claim, sources }: { claim: AuditClaim; sources?: SourceDescr
         <span className={`rounded px-2 py-0.5 text-xs font-medium ${VERDICT_PILL[claim.verdict]}`}>
           {VERDICT_LABEL[claim.verdict]}
         </span>
-        {claim.resolution ? (
-          <span className="text-xs text-text-dim">{claim.resolution}</span>
-        ) : null}
+        {claim.resolution ? <span className="text-xs text-text-dim">{claim.resolution}</span> : null}
       </div>
       <p className="mb-1 text-sm text-text-primary">
         <span className="font-medium">Claim:</span> {claim.claim_text}
@@ -176,12 +175,7 @@ function ClaimRow({ claim, sources }: { claim: AuditClaim; sources?: SourceDescr
           {claim.web_evidence.map((e, i) => (
             <span key={e.url}>
               {i > 0 ? ", " : null}
-              <a
-                href={e.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-accent hover:text-link-hover"
-              >
+              <a href={e.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:text-link-hover">
                 {e.title}
               </a>
             </span>

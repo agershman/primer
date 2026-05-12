@@ -145,9 +145,7 @@ export function AuditPopover({ targetKind, targetId, trail, sources }: AuditPopo
         </button>
       </div>
 
-      {claim.reasoning ? (
-        <p className="mb-2 text-sm text-text-secondary">{claim.reasoning}</p>
-      ) : null}
+      {claim.reasoning ? <p className="mb-2 text-sm text-text-secondary">{claim.reasoning}</p> : null}
 
       {claim.resolution === "patched" && claim.patched_text ? (
         <div className="mb-2 rounded border border-warning-dim bg-bg-warm p-2 text-sm">
