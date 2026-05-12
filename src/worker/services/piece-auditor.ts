@@ -439,9 +439,43 @@ function auditableBlocks(content: ContentBlock[]): Array<{ block: ContentBlock; 
 }
 
 /**
+ * Strip inline `[[ref:<id>]]` markers from a block's value. Returns
+ * the cleaned text + an ordered list of refs that appeared in the
+ * span so the LLM auditor receives both halves of the signal:
+ *   - clean text (offsets into this match what RichText renders).
+ *   - the per-block cite list, kept for the LLM to corroborate
+ *     against the source bundle.
+ *
+ * Idempotent: a block that never carried tags is returned unchanged.
+ */
+function stripRefTags(value: string): { stripped: string; refs: string[] } {
+  const tagPattern = /\[\[ref:([^\]]+)\]\]/g;
+  const refs: string[] = [];
+  const stripped = value.replace(tagPattern, (_match, id: string) => {
+    refs.push(id);
+    return "";
+  });
+  return { stripped, refs };
+}
+
+function withStrippedContent(content: ContentBlock[]): ContentBlock[] {
+  return content.map((b) => {
+    if (b.type !== "text" && b.type !== "heading") return b;
+    const { stripped } = stripRefTags(b.value);
+    return { ...b, value: stripped };
+  });
+}
+
+/**
  * Public entry point. Most callers should use one of the thin
  * wrappers (`auditPiece`, `auditDeepDive`, `auditQuiz`) below — they
  * pin the `targetKind` and the operation tags for cost accounting.
+ *
+ * Strips writer-emitted `[[ref:<id>]]` markers from each block
+ * BEFORE classification so audit offsets line up with the
+ * user-visible rendered text. The persisted content carries the
+ * stripped form; the LLM still sees what the writer intended to
+ * cite via a per-block `inline_refs` field on the classify prompt.
  */
 export async function auditContent(args: AuditContentArgs): Promise<AuditContentResult> {
   const startedAt = Date.now();
@@ -450,11 +484,15 @@ export async function auditContent(args: AuditContentArgs): Promise<AuditContent
   const patchOperation = "piece_audit_patch";
   const webSearchOperation = "piece_audit_websearch";
 
+  // Strip [[ref:...]] markers up-front so every offset the auditor
+  // produces is into the same clean string the frontend will render.
+  const strippedContent = withStrippedContent(args.content);
+
   try {
     // ── Pass 1: classify per block ──
     const passOneClaims: ResolvedClaim[] = [];
     const blockTexts = new Map<number, string>(); // post-patch text per block
-    const blocks = auditableBlocks(args.content);
+    const blocks = auditableBlocks(strippedContent);
     for (const { block, index } of blocks) {
       blockTexts.set(index, block.value);
       const { claims, usage } = await classifyBlock(args.llm, args.auditSpec, block, index, args.sources);
@@ -506,7 +544,7 @@ export async function auditContent(args: AuditContentArgs): Promise<AuditContent
     for (const claim of patchedClaims) {
       if (claim.verdict !== "unsupported" && claim.verdict !== "hallucinated") continue;
       try {
-        const targetBlock = args.content[claim.block_index];
+        const targetBlock = strippedContent[claim.block_index];
         if (!targetBlock) continue;
         const { decision, usage } = await patchClaim(
           args.llm,
@@ -525,7 +563,9 @@ export async function auditContent(args: AuditContentArgs): Promise<AuditContent
     }
 
     // ── Apply resolutions per block (right-to-left) ──
-    const updatedContent: ContentBlock[] = [...args.content];
+    // Operate on the stripped content so the offsets we recorded
+    // line up; the persisted final content is the stripped form.
+    const updatedContent: ContentBlock[] = [...strippedContent];
     const finalClaims: ResolvedClaim[] = [];
     const claimsByBlock = new Map<number, PatchedClaim[]>();
     for (const c of patchedClaims) {
@@ -693,7 +733,11 @@ export async function auditContent(args: AuditContentArgs): Promise<AuditContent
       console.error("[piece-auditor] failed to persist failure row:", writeErr);
     }
     return {
-      content: args.content,
+      // On a failed audit the writer's [[ref:...]] markers are still
+      // stripped (consistent with the success path's user-visible
+      // contract); the writer's intent survives in the source bundle
+      // for the next regenerate.
+      content: strippedContent,
       audit: failedSummary,
       trail: {
         target_kind: args.targetKind,
