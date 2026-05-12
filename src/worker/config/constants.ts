@@ -19,6 +19,8 @@ export const ID_PREFIXES = {
   pieceSeries: "ser_",
   sourceInstance: "ecs_",
   notification: "ntf_",
+  audit: "adt_",
+  auditClaim: "ac_",
 } as const;
 
 export const DEPTH_SCALE = {

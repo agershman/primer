@@ -77,6 +77,7 @@ import { extractConcepts } from "./concept-extractor.js";
 import { type ClassificationResult, classifyDraft, findCandidatePredecessors } from "./continuation-classifier.js";
 import { runDecayJob } from "./depth-manager.js";
 import { type FocusScorerCandidate, scoreCandidatesAgainstFocus } from "./focus-scorer.js";
+import { auditPiece, auditQuiz } from "./piece-auditor.js";
 import { generateQuiz } from "./quiz-assessor.js";
 import { filterSlackByRelevance } from "./slack-relevance-filter.js";
 import { generateTeachingPiece } from "./teaching-generator.js";
@@ -210,6 +211,11 @@ export async function generateDailyBriefing(
     const quizGenerationSpec = resolveModel(surfaceMap, "quizGeneration");
     const continuationSpec = resolveModel(surfaceMap, "continuationClassifier");
     const focusScoringSpec = resolveModel(surfaceMap, "focusScoring");
+    const auditSpec = resolveModel(surfaceMap, "audit");
+    // Patch model defaults to the same model as the drafter (voice
+    // consistency) but can be overridden in
+    // Settings → Intelligence → AI models.
+    const auditPatchSpec = resolveModel(surfaceMap, "auditPatch");
     // Persisted on the briefing row for analytics. Stored as a flat
     // `<operation>: <model>` map for backwards compatibility with older
     // briefings; PR 2 will widen this to capture provider + reasoning.
@@ -220,6 +226,8 @@ export async function generateDailyBriefing(
       quizGeneration: quizGenerationSpec.model,
       continuationClassifier: continuationSpec.model,
       focusScoring: focusScoringSpec.model,
+      audit: auditSpec.model,
+      auditPatch: auditPatchSpec.model,
     };
 
     await updateProgress(db, briefingId, "work_context", "Fetching work context…");
@@ -867,6 +875,7 @@ export async function generateDailyBriefing(
                 modelSpec: teachingPieceSpec,
                 aboutStatement,
                 focusStatement,
+                sourceContext: target.sourceContext,
               });
             },
             null,
@@ -1022,6 +1031,42 @@ export async function generateDailyBriefing(
           pieceDetails.push(`✓ ${piece.title} (${piece.pieceType}, ${piece.readTimeMinutes}m)`);
           const pieceId = genId("teachingPiece");
 
+          // ── Audit pass ──
+          // Runs after the writer + continuation rewrite, BEFORE the
+          // insert, so the persisted content reflects any patches /
+          // drops the auditor applied. Audit rows are written to the
+          // `audits` + `audit_claims` tables under the pieceId we just
+          // minted. Fail-open: the auditor itself catches its own
+          // exceptions and returns the original content + a
+          // status='failed' summary row.
+          const auditStartedAt = Date.now();
+          const audited = await auditPiece({
+            db,
+            userId,
+            llm,
+            targetId: pieceId,
+            content: piece.content,
+            sources: target.sourceContext ?? [],
+            auditSpec,
+            patchSpec: auditPatchSpec,
+          });
+          piece = { ...piece, content: audited.content };
+          await recordTiming(db, {
+            briefingId,
+            userId,
+            stepKey: "piece_audit",
+            startedAt: auditStartedAt,
+            itemsProcessed: audited.audit.total_claims,
+            modelUsed: auditSpec.model,
+            metadata: {
+              status: audited.audit.status,
+              patched: audited.audit.patched_count,
+              dropped: audited.audit.dropped_count,
+              grounded_web: audited.audit.grounded_web_count,
+              used_web_search: audited.audit.used_web_search,
+            },
+          });
+
           // Derive the piece's due_at + due_reason from its sources.
           // When multiple sources have deadlines, we pick the SOONEST as
           // the piece's deadline — the user should always see the most
@@ -1143,6 +1188,38 @@ export async function generateDailyBriefing(
           .bind(briefingId, `%${lowestDepthTarget.conceptId}%`)
           .first<{ id: string }>();
 
+        // Audit the question text against the web-search backstop.
+        // Quizzes have no local source bundle by construction — the
+        // backstop is the only verification primitive available, so
+        // `auditQuiz` forces `enableWebSearch=true` internally.
+        const quizAuditStartedAt = Date.now();
+        const auditedQuiz = await auditQuiz({
+          db,
+          userId,
+          llm,
+          targetId: quizId,
+          content: [{ type: "text", value: quizStep.data.question }],
+          auditSpec,
+          patchSpec: auditPatchSpec,
+        });
+        const auditedQuestion =
+          auditedQuiz.content[0]?.value && auditedQuiz.content[0].value.length > 0
+            ? auditedQuiz.content[0].value
+            : quizStep.data.question;
+        await recordTiming(db, {
+          briefingId,
+          userId,
+          stepKey: "quiz_audit",
+          startedAt: quizAuditStartedAt,
+          itemsProcessed: auditedQuiz.audit.total_claims,
+          modelUsed: auditSpec.model,
+          metadata: {
+            status: auditedQuiz.audit.status,
+            patched: auditedQuiz.audit.patched_count,
+            dropped: auditedQuiz.audit.dropped_count,
+          },
+        });
+
         await db
           .prepare(
             `INSERT INTO calibration_quizzes
@@ -1155,7 +1232,7 @@ export async function generateDailyBriefing(
             userId,
             lowestDepthTarget.conceptId,
             pieceForConcept?.id ?? null,
-            quizStep.data.question,
+            auditedQuestion,
             quizStep.data.context,
             JSON.stringify(quizStep.data.expectedDepthIndicators),
             quizStep.data.modelUsed,

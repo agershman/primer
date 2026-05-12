@@ -109,6 +109,20 @@ settingsRoutes.patch("/settings", async (c) => {
     binds.push(JSON.stringify(sourceFilterOverrides));
   }
 
+  // Per-user toggle for the inline wavy-underline audit marks on
+  // teaching pieces, deep dives, and quizzes. User-level on purpose
+  // — this is reading-comfort personalization, not deployment-wide
+  // config. Stored as 0/1 in D1; serialized as boolean over the
+  // wire (see the GET response shape below).
+  const showAuditMarks = body.showAuditMarks ?? body.show_audit_marks;
+  if (showAuditMarks !== undefined) {
+    if (typeof showAuditMarks !== "boolean") {
+      return c.json({ error: "showAuditMarks must be a boolean" }, 400);
+    }
+    updates.push("show_audit_marks = ?");
+    binds.push(showAuditMarks ? 1 : 0);
+  }
+
   // Per-user opt-in list of source IDs. User-level on purpose: this
   // governs what shows up in THIS user's briefing, not what the
   // deployment fetches. Validate against the live registry so a typo
@@ -158,6 +172,7 @@ settingsRoutes.patch("/settings", async (c) => {
     filter_prompt: string | null;
     source_filter_overrides: string | null;
     enabled_source_ids: string | null;
+    show_audit_marks: number;
   }>();
 
   let overrides: Record<string, string> = {};
@@ -191,6 +206,7 @@ settingsRoutes.patch("/settings", async (c) => {
     filterPrompt: settingsRow?.filter_prompt ?? null,
     sourceFilterOverrides: overrides,
     enabledSourceIds: updatedEnabledSourceIds,
+    showAuditMarks: Number(settingsRow?.show_audit_marks ?? 1) === 1,
   };
 
   return c.json({ settings: updatedSettings });

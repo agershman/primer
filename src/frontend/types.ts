@@ -8,9 +8,24 @@
 // (the `TeachingPieceData.content` and `QuizAssessmentData.learningPath`
 // fields reference them as types) — re-exports alone don't bring a
 // name into local scope, only into the consumers' module scope.
-import type { ContentBlock, Resource } from "../shared/types";
+import type {
+  AuditSummary,
+  AuditTrail,
+  ContentBlock,
+  Resource,
+} from "../shared/types";
 
-export type { ContentBlock, Resource } from "../shared/types";
+export type {
+  AuditClaim,
+  AuditResolution,
+  AuditSummary,
+  AuditTargetKind,
+  AuditTrail,
+  AuditVerdict,
+  ContentBlock,
+  Resource,
+  WebEvidence,
+} from "../shared/types";
 
 export interface PieceConcept {
   id: string;
@@ -80,7 +95,30 @@ export interface TeachingPieceData {
    */
   series_id?: string | null;
   part_number?: number | null;
+  /**
+   * Pass-1 audit rollup carried inline on the briefing-read response.
+   * Drives the `<AuditIndicator>` pill in the metadata row + the
+   * decision to fetch the full trail when the user opens the panel.
+   * Absent when the piece pre-dates the audit feature (rows generated
+   * before migration 0007) or when audit ran and recorded
+   * `status='failed'`.
+   */
+  audit_summary?: AuditSummary;
+  /**
+   * Same rollup but for `teaching_pieces.deep_dive_content`. Only set
+   * when the user has generated a deep dive on this piece and the
+   * audit ran on the expansion. The deep-dive view renders its own
+   * indicator + panel — distinct from the parent piece's audit.
+   */
+  deep_dive_audit_summary?: AuditSummary;
 }
+
+/**
+ * Full audit trail as returned by `GET /api/piece/:id/audit`,
+ * `GET /api/piece/:id/deep-dive/audit`, and `GET /api/quiz/:id/audit`.
+ * Re-exported here for the components that consume it directly.
+ */
+export type PieceAuditResponse = AuditTrail;
 
 /**
  * Entry in `BriefingData.redundantDrafts`. One per topic that the

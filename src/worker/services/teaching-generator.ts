@@ -72,6 +72,16 @@ export interface TeachingGenerateOptions {
    * most drafts are NOVEL and have no predecessor.
    */
   continuation?: ContinuationContext | null;
+  /**
+   * Source bundle the writer should cite via inline `[[ref:...]]` tags.
+   * The auditor pass that runs after this generator uses the same
+   * bundle to verify the writer's claims, so anything not listed here
+   * cannot be cited and any tag pointing at a non-listed id is a
+   * fabricated citation (which the auditor will catch). Optional for
+   * callers that don't have a structured bundle (e.g. ad-hoc
+   * regenerate paths) — the writer will then emit no tags.
+   */
+  sourceContext?: Array<{ type: string; id?: string; url?: string; title?: string; summary?: string }>;
 }
 
 function defaultTeachingSpec(): ModelSpec {
@@ -152,6 +162,14 @@ CITATIONS AND LINKS:
 - If you are uncertain whether something is accurate, qualify it: "some organizations have adopted..." rather than asserting "Company X published...".
 - Resources at the end should be pages the reader can actually learn from — not vanity URLs.
 
+INLINE REF TAGS — anchoring claims to the source bundle:
+- When a sentence makes a factual claim that comes from the source bundle below (Linear tickets, Slack threads, incidents, articles), append an inline ref tag at the end of that sentence using the format \`[[ref:<enrichment-id>]]\`.
+- The \`<enrichment-id>\` MUST be one of the allowed IDs supplied in the user message. Do NOT invent IDs.
+- A sentence can carry multiple tags if it draws on multiple sources: \`...the rollback was triggered manually [[ref:linear_issue:CIN-1234]] [[ref:slack_thread:C04567/p1714]].\`
+- Place the tag IMMEDIATELY before the closing punctuation, like a citation. The frontend strips them from the rendered text and uses them to drive the audit indicator + the per-claim popover, so they must be present in the JSON output as written.
+- If a sentence is general background that the source bundle doesn't speak to, DO NOT add a tag — an unsupported tag is worse than no tag (the auditor will flag it as a fabricated citation).
+- This applies to all \`text\` and \`heading\` blocks. Do NOT embed ref tags inside \`code\` or \`diagram\` blocks.
+
 ${depthSystemPrompt(target.depthScore)}
 
 TARGET: ~${wordTarget} words. Piece type: "${pieceType}".
@@ -189,6 +207,22 @@ Content can include code blocks (type "code" with a language) and mermaid diagra
     sourceContextLines.push(
       "Focus on what the reader needs to know to be implementation-ready. Identify practical gaps.",
     );
+  }
+
+  // Surface the allowed enrichment IDs the writer can use in
+  // `[[ref:...]]` tags. Sources without a stable id fall back to
+  // their URL — matches the auditor's `allowedRefs` derivation in
+  // `piece-auditor.ts`.
+  const allowedRefs = (options.sourceContext ?? [])
+    .map((s) => {
+      const key = (s as { id?: string; url?: string }).id ?? (s as { url?: string }).url;
+      if (!key) return null;
+      const title = (s as { title?: string }).title ?? "";
+      return `  - ${(s as { type: string }).type}:${key}${title ? ` — ${title}` : ""}`;
+    })
+    .filter((line): line is string => line !== null);
+  if (allowedRefs.length > 0) {
+    sourceContextLines.push(`Allowed [[ref:...]] IDs (use any sentence-tag verbatim from this list, no others):\n${allowedRefs.join("\n")}`);
   }
 
   const userMessage = `Write a ${pieceType} teaching piece about "${target.conceptName}" (category: ${target.category ?? "general"}).
