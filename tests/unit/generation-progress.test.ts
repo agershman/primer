@@ -173,9 +173,9 @@ describe("Auditing pieces progress label", () => {
     // GENERATION_STEPS list in routes/analytics.ts and skew the
     // BriefingWaterfall column count. Audit is a sub-phase of
     // piece generation, not its own pipeline phase.
-    const src = await import("node:fs/promises").then((m) =>
-      m.readFile(new URL("../../src/worker/services/briefing-generator.ts", import.meta.url), "utf-8"),
-    );
+    const { readFile } = await import("node:fs/promises");
+    const { resolve } = await import("node:path");
+    const src = await readFile(resolve(__dirname, "..", "..", "src/worker/services/briefing-generator.ts"), "utf-8");
     expect(src).toMatch(/`Auditing \$\{range\} of \$\{selected\.length\}/);
     // The Auditing call must use the same step key as Writing.
     const match = src.match(/`Auditing \$\{range\} of \$\{selected\.length\}.*?\)/s);
