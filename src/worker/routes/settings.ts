@@ -206,7 +206,7 @@ settingsRoutes.patch("/settings", async (c) => {
     filterPrompt: settingsRow?.filter_prompt ?? null,
     sourceFilterOverrides: overrides,
     enabledSourceIds: updatedEnabledSourceIds,
-    showAuditMarks: Number(settingsRow?.show_audit_marks ?? 1) === 1,
+    showAuditMarks: Number(settingsRow?.show_audit_marks ?? 0) === 1,
   };
 
   return c.json({ settings: updatedSettings });

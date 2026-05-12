@@ -884,6 +884,20 @@ export async function generateDailyBriefing(
         }),
       );
 
+      // Writing is done for this batch; the inner loop now runs the
+      // continuation classifier, optional regen, and the audit pass.
+      // Update the progress label so the user sees "Auditing" rather
+      // than a stale "Writing" while the audit (the slowest of the
+      // three) is running.
+      await updateProgress(
+        db,
+        briefingId,
+        "generating_pieces",
+        `Auditing ${range} of ${selected.length}: ${batch.map((t) => t.conceptName).join(", ")}`,
+        pieceDetails,
+        true,
+      );
+
       for (const { target, pieceStep, pieceStartedAt } of batchResults) {
         await recordTiming(db, {
           briefingId,

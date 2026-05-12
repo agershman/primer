@@ -131,9 +131,15 @@ export function AuditIndicator({
         <span>{pill.label}</span>
       </button>
       {open ? (
+        // Anchor left on narrow viewports (the pill often wraps to the
+        // start of its row on mobile, so a right-anchored menu would
+        // overflow off-screen — see the iPhone SE bug); flip back to a
+        // right anchor at `sm:` and up where the pill sits inline with
+        // the metadata row. `max-w-[calc(100vw-2rem)]` keeps the menu
+        // inside the viewport even when the pill is roughly centered.
         <div
           role="menu"
-          className="absolute right-0 z-20 mt-1 min-w-[14rem] rounded-md border border-border bg-surface shadow-lg"
+          className="absolute left-0 sm:left-auto sm:right-0 z-20 mt-1 min-w-[14rem] max-w-[calc(100vw-2rem)] rounded-md border border-border bg-surface shadow-lg"
         >
           <button
             type="button"

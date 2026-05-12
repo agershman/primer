@@ -38,6 +38,13 @@ interface RichTextProps {
   auditTarget?: { kind: "piece" | "deep_dive" | "quiz"; id: string };
 }
 
+const VERDICT_TITLES: Record<AuditHighlightRange["verdict"], string> = {
+  grounded: "Source-grounded — click for details",
+  "grounded-web": "Web-verified — click for evidence",
+  unsupported: "Unsupported by sources — click for the auditor's note",
+  hallucinated: "Likely hallucinated — click for the auditor's note",
+};
+
 /**
  * Wrap `parseInlineMarkup`'s output with audit-mark overlays. Spans
  * are applied right-to-left so DOM-build offsets stay stable when
@@ -64,12 +71,18 @@ function renderTextWithAuditMarks(
       out.push(...parseInlineMarkup(text.slice(cursor, start)));
     }
     const verdictClass = r.patched ? "audit-mark-patched" : `audit-mark-${r.verdict}`;
+    // `title` provides hover / long-press affordance so the user can
+    // discover what the wavy underline means without committing to a
+    // click — important on mobile where the popover would otherwise
+    // be the only way to surface the verdict.
+    const verdictTitle = r.patched ? "Patched by audit — click for the diff" : VERDICT_TITLES[r.verdict];
     out.push(
       <span
         key={`mark-${key++}-${r.claimId}`}
         className={`audit-mark ${verdictClass}`}
         role="button"
         tabIndex={0}
+        title={verdictTitle}
         data-claim-id={r.claimId}
         onClick={(e) => {
           dispatchPrimerEvent("audit-mark-clicked", {

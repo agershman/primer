@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { AdminOnly } from "../hooks/useCurrentUser";
+import { AdminOnly, useCurrentUserContext } from "../hooks/useCurrentUser";
 import { onPrimerEvent } from "../lib/events";
 import type { AuditTrail, PieceSeriesPart, PieceSeriesResponse, SourceDescriptor, TeachingPieceData } from "../types";
 import { apiGet, apiPost } from "../utils/api";
@@ -124,11 +124,13 @@ export function TeachingPiece({
   const sources = piece.source_context ?? [];
 
   // ── Audit surface state ──
-  // Inline marks visibility defaults to ON; per-piece toggle from
-  // the AuditIndicator dropdown overrides via the typed event bus.
-  // A future Settings → "Show audit marks inline" toggle will seed
-  // a global default by reading user_settings.show_audit_marks.
-  const [marksVisible, setMarksVisible] = useState(true);
+  // Inline marks visibility seeds from the user's
+  // `settings.showAuditMarks` (default-false). The per-piece toggle
+  // from the AuditIndicator dropdown overrides this via the typed
+  // event bus without persisting — so flipping marks on for one
+  // piece doesn't change the global default.
+  const currentUser = useCurrentUserContext();
+  const [marksVisible, setMarksVisible] = useState<boolean>(() => currentUser?.settings?.showAuditMarks ?? false);
   useEffect(
     () =>
       onPrimerEvent("audit-marks-visibility-changed", (detail) => {
