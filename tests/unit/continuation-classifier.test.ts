@@ -632,8 +632,11 @@ describe("frontend types and components", () => {
   it("BriefingPage renders RedundantDraftsChip only when there are entries", async () => {
     const src = await read("src/frontend/pages/BriefingPage.tsx");
     expect(src).toContain("import { RedundantDraftsChip }");
+    // The date-scoped view narrows `briefing` to non-null before this
+    // render branch, so the gate is `briefing.redundantDrafts && …`
+    // rather than `briefing?.redundantDrafts && …`.
     expect(src).toMatch(
-      /briefing\?\.redundantDrafts && briefing\.redundantDrafts\.length > 0[\s\S]{0,200}<RedundantDraftsChip/,
+      /briefing\??\.redundantDrafts && briefing\.redundantDrafts\.length > 0[\s\S]{0,200}<RedundantDraftsChip/,
     );
   });
 

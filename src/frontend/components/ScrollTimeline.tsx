@@ -73,7 +73,7 @@ export function ScrollTimeline({ dates, currentDate, onScrub }: ScrollTimelinePr
   const [previewDate, setPreviewDate] = useState<string | null>(null);
 
   // Take only the most-recent N days. The full-retention rail handed
-  // out in the parent (`PastBriefingsTimeline`) still works as the
+  // out in the parent (`BriefingFeed`) still works as the
   // source of truth — the rail just chooses to display a digestible
   // slice. Days outside this window are reachable via the Archive
   // page's calendar.

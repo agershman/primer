@@ -25,7 +25,7 @@ Primer separates **deployment-wide configuration** (sources, AI model picks, voi
 
 Click your **avatar** in the top-right corner of the header to open the Settings modal. Changes auto-save as you edit — a brief "Saved" indicator in the footer confirms each update.
 
-Your saved settings apply to **every** briefing run — both manual generation (clicking the refresh button) and the daily 5 AM UTC cron trigger. When you change a filter or model override, the next briefing will use it automatically.
+Your saved settings apply to **every** briefing run — both on-demand generation (clicking **Generate now** at the top of the feed) and the daily 5 AM UTC cron trigger. When you change a filter or model override, the next briefing will use it automatically.
 
 The modal is sidenav-driven. Entries are grouped into four sections (admin only — regular users see only Personalization + Account):
 

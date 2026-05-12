@@ -330,53 +330,78 @@ describe("Diagram expand modal", () => {
   });
 });
 
-describe("Past briefings timeline (vertical scroll through history)", () => {
-  it("PastBriefingsTimeline component exists and excludes today's date", async () => {
-    const src = await read("src/frontend/components/PastBriefingsTimeline.tsx");
-    expect(src).toContain("export function PastBriefingsTimeline");
-    expect(src).toContain("excludeDate");
-    expect(src).toContain("b.briefing_date !== excludeDate");
+describe("Briefing feed (root view: reverse-chrono log of dated sections)", () => {
+  it("BriefingFeed component exists and includes today in the feed", async () => {
+    // The feed treats every date the same — today is just the
+    // newest section, not a special hero. No `excludeDate` filtering
+    // any more; "Generate now" lives above the feed instead of as a
+    // refresh button on a today-hero block.
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
+    expect(src).toContain("export function BriefingFeed");
+    expect(src).not.toContain("excludeDate");
   });
 
-  it("PastBriefingsTimeline uses infinite scroll for paginated date list", async () => {
-    const src = await read("src/frontend/components/PastBriefingsTimeline.tsx");
+  it("BriefingFeed uses infinite scroll for paginated date list", async () => {
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
     expect(src).toContain("useInfiniteScroll");
     expect(src).toContain("/api/briefings?");
-    // Page-size constant defined for paging
     expect(src).toMatch(/PAGE_SIZE\s*=\s*\d+/);
   });
 
-  it("PastBriefingSection lazy-loads each day's content via IntersectionObserver", async () => {
-    const src = await read("src/frontend/components/PastBriefingsTimeline.tsx");
-    expect(src).toContain("function PastBriefingSection");
+  it("BriefingSection lazy-loads each day's content via IntersectionObserver", async () => {
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
+    expect(src).toContain("function BriefingSection");
     expect(src).toContain("IntersectionObserver");
     expect(src).toContain('rootMargin: "400px 0px"');
     expect(src).toContain("/api/briefing/${item.briefing_date}");
   });
 
-  it("PastBriefingSection has a sticky date header with relative time label", async () => {
-    const src = await read("src/frontend/components/PastBriefingsTimeline.tsx");
+  it("BriefingSection has a sticky date header with relative time label", async () => {
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
     expect(src).toContain("function DateHeader");
     expect(src).toContain("sticky top-0");
+    expect(src).toContain('"today"');
     expect(src).toContain('"yesterday"');
     expect(src).toContain("days ago");
   });
 
-  it("PastBriefingSection wires through feedback + regeneration handlers for past pieces", async () => {
-    const src = await read("src/frontend/components/PastBriefingsTimeline.tsx");
-    // onFeedback POSTs to the same endpoint as today's pieces
-    expect(src).toContain("onFeedback={async (pieceId, feedback) =>");
+  it("BriefingSection wires through feedback + regeneration handlers", async () => {
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
+    // onFeedback handler is passed down from the feed; POST happens
+    // in the feed-level handler that owns the depth-delta toast.
     expect(src).toContain("/api/piece/${pieceId}/feedback");
-    // onRegenerated updates local state
+    expect(src).toContain("onFeedback={onFeedback}");
     expect(src).toContain("onRegenerated=");
   });
 
-  it("BriefingPage mounts the timeline only on the root /briefing view, not on past dates or deep dives", async () => {
+  it("BriefingPage mounts the feed only on the root view, not on past dates or deep dives", async () => {
     const src = await read("src/frontend/pages/BriefingPage.tsx");
-    expect(src).toContain('import { PastBriefingsTimeline }');
-    // Conditional render guards: no `date` URL param, no deepDiveId, briefing loaded
-    expect(src).toMatch(/!date\s*&&\s*!deepDiveId[\s\S]{0,200}<PastBriefingsTimeline/);
-    expect(src).toContain("excludeDate={briefing.briefing_date}");
+    expect(src).toContain('import { BriefingFeed }');
+    // Root branch: no date param AND no deepDive id → render the feed.
+    expect(src).toMatch(/!date\s*&&\s*!deepDiveId[\s\S]{0,100}<BriefingFeed/);
+  });
+
+  it("BriefingFeed surfaces a top-level 'Generate now' action above the feed", async () => {
+    // "Generate now" replaced the per-briefing "Refresh" icon. The
+    // action is date-agnostic — clicks just kick off an on-demand
+    // run of what the daily cron does, appending any new pieces to
+    // the log. An empty run yields a toast + bell notification
+    // instead of replacing the feed with a "no content today" state.
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
+    expect(src).toContain("Generate now");
+    expect(src).toContain("FeedActionBar");
+    // Uses the generation hook (not useBriefing) — generation acts
+    // on today regardless of which date(s) the feed is showing.
+    expect(src).toContain("useGeneration");
+  });
+
+  it("BriefingFeed hides zero-piece briefings from the visible feed", async () => {
+    // An empty run still stamps a row server-side (with
+    // noContentReason), but the user-facing feed is about *content*.
+    // Surfacing a "0 pieces" section would duplicate the toast that
+    // already fires on completion.
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
+    expect(src).toMatch(/pieceCount[\s\S]{0,40}>\s*0/);
   });
 });
 
@@ -625,13 +650,13 @@ describe("first-run onboarding + in-flow focus editing", () => {
     expect(src).not.toContain("user.focusStatement");
   });
 
-  it("PastBriefingsTimeline no longer renders a 'focus then' chip per section", async () => {
+  it("BriefingFeed no longer renders a 'focus then' chip per section", async () => {
     // Same shift as the BriefingPage pill — focus is no longer
     // surfaced per-briefing. The backend still tracks
     // `focus_version_id` on every briefing for analytics + history,
-    // but the timeline is now a clean read of the briefing content
-    // without an inline historical-focus chip.
-    const src = await read("src/frontend/components/PastBriefingsTimeline.tsx");
+    // but the feed is a clean read of the briefing content without
+    // an inline historical-focus chip.
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
     expect(src).not.toContain("currentFocusStatement");
     expect(src).not.toContain("showFocusAtTime");
     expect(src).not.toContain("focus then");
@@ -647,8 +672,8 @@ describe("first-run onboarding + in-flow focus editing", () => {
     );
     expect(src).toContain("focus_statement_at_briefing");
     // Both endpoints must surface the field on the response — the
-    // briefing page header pill (today's route) AND the past-section
-    // load (PastBriefingsTimeline → /briefing/:date) need it.
+    // briefing page header pill (today's route) AND the per-section
+    // load (BriefingFeed → /briefing/:date) need it.
     expect(src).toContain("focusStatementAtBriefing:");
     // Pre-versioning briefings (focus_version_id NULL) get null on the
     // wire, which the UI uses to hide the historical badge.
@@ -874,8 +899,8 @@ describe("AI-generated briefing greeting (removed)", () => {
     expect(src).not.toMatch(/{b\.greeting}/);
   });
 
-  it("PastBriefingsTimeline no longer renders the greeting line", async () => {
-    const src = await read("src/frontend/components/PastBriefingsTimeline.tsx");
+  it("BriefingFeed no longer renders the greeting line", async () => {
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
     expect(src).not.toMatch(/{item\.greeting}/);
     expect(src).not.toMatch(/item\.greeting && \(/);
   });
@@ -1044,15 +1069,14 @@ describe("bookmarks", () => {
     expect(src).toContain("dueReason?: string | null");
   });
 
-  it("GenerationProgress renders ABOVE displayPieces in the JSX so streaming pieces don't push the panel down the page", async () => {
-    const src = await read("src/frontend/pages/BriefingPage.tsx");
-    // Find the JSX render sites for both regions. The progress panel
-    // mount is gated by `isStillGenerating &&`; the piece list mount
-    // is gated by `displayPieces.length > 0 &&`. Whichever comes
-    // first in the source is what the user sees first when both are
-    // visible (mid-generation with some pieces already streamed in).
+  it("GenerationProgress renders ABOVE the feed sections so streaming pieces don't push the panel down the page", async () => {
+    // The feed mounts `<GenerationProgress>` directly above its
+    // `items.map(...)` date-section render. Mid-generation, new
+    // pieces append to today's section *below* the panel, so the
+    // user's focal point — the progress panel — stays anchored.
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
     const progressIdx = src.indexOf("<GenerationProgress");
-    const piecesIdx = src.indexOf("displayPieces.map");
+    const piecesIdx = src.indexOf("items.map((b) =>");
     expect(progressIdx).toBeGreaterThan(0);
     expect(piecesIdx).toBeGreaterThan(0);
     expect(progressIdx).toBeLessThan(piecesIdx);
@@ -1745,8 +1769,8 @@ describe("scroll-timeline scrubber + calendar archive", () => {
     expect(appSrc).toContain("lg:pr-16");
   });
 
-  it("PastBriefingsTimeline tracks visible date and wires ScrollTimeline", async () => {
-    const src = await read("src/frontend/components/PastBriefingsTimeline.tsx");
+  it("BriefingFeed tracks visible date and wires ScrollTimeline", async () => {
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
     // Must fetch the full date list (not just the paginated chunk) so the
     // scrubber rail represents the user's complete retention window.
     expect(src).toContain('apiGet<BriefingDatesResponse>("/api/briefings/dates")');
@@ -2547,33 +2571,20 @@ describe("local-day boundary correctness", () => {
 });
 
 describe("past briefings stay readable during today's regeneration", () => {
-  it("PastBriefingsTimeline is NOT gated on !isStillGenerating", async () => {
-    const src = await read("src/frontend/pages/BriefingPage.tsx");
-    // Past briefings are independent of today's regeneration. Hiding
-    // the timeline mid-refresh strands the user on a spinner-only
-    // screen for content they could otherwise read. The conditional
-    // must include the route + briefing-presence guards but NOT the
-    // generation status.
-    const blockMatch = src.match(
-      /\{[^{}]*<PastBriefingsTimeline[\s\S]*?\}\s*$/m,
-    );
-    // Locate the line that renders PastBriefingsTimeline and a few
-    // lines of context to inspect the conditional.
-    const timelineRender = src.indexOf("<PastBriefingsTimeline");
-    expect(timelineRender).toBeGreaterThan(-1);
-    // Walk back to the opening `{` of the JSX expression that gates
-    // this render and confirm `!isStillGenerating` is not part of it.
-    const openBrace = src.lastIndexOf("{", timelineRender);
-    const conditional = src.slice(openBrace, timelineRender);
-    expect(conditional).not.toContain("!isStillGenerating");
-    // Sanity: route + briefing presence guards still in place so the
-    // timeline doesn't render on `/briefing/<past-date>` deep-link
-    // pages or before the briefing row exists.
-    expect(conditional).toContain("!date");
-    expect(conditional).toContain("!deepDiveId");
-    expect(conditional).toContain("briefing?.briefing_date");
-    // Quiet down the linter on the unused capture from the regex match.
-    void blockMatch;
+  it("BriefingFeed renders past sections regardless of generation state", async () => {
+    // Past briefings are independent of today's regeneration. The
+    // feed renders its date sections at all times; only the
+    // generation progress panel (above the feed) is gated on the
+    // generating flag.
+    const src = await read("src/frontend/components/BriefingFeed.tsx");
+    // The list-mapping render of items is unconditional — no
+    // `!generating &&` guard around it.
+    const itemsRender = src.indexOf("items.map((b) => (");
+    expect(itemsRender).toBeGreaterThan(-1);
+    const openBrace = src.lastIndexOf("{", itemsRender);
+    const guard = src.slice(openBrace, itemsRender);
+    expect(guard).not.toContain("!generation.generating");
+    expect(guard).not.toContain("!isStillGenerating");
   });
 });
 
@@ -2587,31 +2598,35 @@ describe("post-generate polling does not orphan setInterval", () => {
   // already stored in pollRef without clearing it — orphaning that
   // interval to run forever and rapidly re-render the page (the
   // "flashing content" bug). The fix is to drop that setInterval
-  // entirely. pollStatus already polls every 2s, self-terminates on
-  // status flip to 'generated', and triggers a final fetchBriefing.
+  // entirely. pollStatus already polls every 2s and self-terminates
+  // on status flip to 'generated'.
+  //
+  // Generation lifecycle moved out of useBriefing into useGeneration
+  // so it could be decoupled from any specific date. The same
+  // anti-pattern guard now applies there.
 
-  it("useBriefing.generate does not start a fetchBriefing setInterval after the apiPost", async () => {
-    const src = await read("src/frontend/hooks/useBriefing.ts");
-    // Strip line comments so explanatory anti-pattern references in
-    // comments don't trip the regex.
+  it("useGeneration.generate does not start a fetch setInterval after the apiPost", async () => {
+    const src = await read("src/frontend/hooks/useGeneration.ts");
     const code = src
       .split("\n")
       .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
       .join("\n");
     expect(code).not.toMatch(
+      /setInterval\(\s*resolveOutcome\s*,\s*\d+\s*\)/,
+    );
+    expect(code).not.toMatch(
       /setInterval\(\s*fetchBriefing\s*,\s*\d+\s*\)/,
     );
   });
 
-  it("useBriefing.generate awaits a single fetchBriefing after the stream resolves", async () => {
-    const src = await read("src/frontend/hooks/useBriefing.ts");
-    // The apiPost path is now a plain string (no `?date=` query
-    // params; the worker uses the X-Client-Timezone header to derive
-    // "today"). The single `await fetchBriefing()` after the stream
-    // resolves still has to be there to refresh the briefing display
-    // post-generation.
+  it("useGeneration.generate kicks pollStatus after the stream resolves", async () => {
+    // The poll loop is the source of truth for completion. After
+    // the stream returns, generate() drives one more pollStatus()
+    // so the hook's `lastOutcome` is ready before any caller-driven
+    // refetch fires.
+    const src = await read("src/frontend/hooks/useGeneration.ts");
     expect(src).toMatch(
-      /await apiPost\(["']\/api\/briefing\/generate["'][\s\S]{0,800}await fetchBriefing\(\)/,
+      /await apiPost\(["']\/api\/briefing\/generate["'][\s\S]{0,800}await pollStatus\(\)/,
     );
   });
 });
