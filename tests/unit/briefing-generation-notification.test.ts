@@ -1,9 +1,9 @@
 /**
- * Pins the "briefing refresh fires a notification when ready" contract.
+ * Pins the "Generate now fires a notification when ready" contract.
  *
  * Bug this test prevents regressing:
- *   1. Click Refresh on the briefing page → generation kicks off as a
- *      streaming response.
+ *   1. Click Generate now at the top of the feed → generation kicks
+ *      off as a streaming response.
  *   2. Navigate away (close tab, hit the back button, switch to the
  *      Concepts page — anything that aborts the open `apiPost`).
  *   3. Generation halts mid-flight because the worker exits when the
@@ -89,10 +89,10 @@ describe("POST /briefing/generate — notification kicks off at start", () => {
 
   it("dismisses any stale in_progress briefing notification before starting", async () => {
     const src = await readSrc("src/worker/routes/briefing.ts");
-    // Without this cleanup, two consecutive refreshes (e.g. a
-    // double-click on the Refresh button, or a retry after a
-    // zombie sweep) would leave two `in_progress` rows in the
-    // bell — confusing.
+    // Without this cleanup, two consecutive on-demand runs (e.g. a
+    // double-click on the Generate now button, or a retry after a
+    // zombie sweep) would leave two `in_progress` rows in the bell
+    // — confusing.
     expect(src).toMatch(
       /UPDATE notifications SET status = 'dismissed'[\s\S]{0,200}WHERE user_id = \? AND kind = \?[\s\S]{0,200}AND status = 'in_progress'/,
     );
@@ -102,7 +102,7 @@ describe("POST /briefing/generate — notification kicks off at start", () => {
     const src = await readSrc("src/worker/routes/briefing.ts");
     // Generation is the user's primary intent; the bell ping is
     // secondary. A transient D1 hiccup creating the notification
-    // row must not cascade into a refresh failure.
+    // row must not cascade into a Generate now failure.
     expect(src).toMatch(
       /try\s*\{[\s\S]{0,400}createNotification\([\s\S]{0,800}\}\s*catch\s*\([^)]*\)\s*\{[\s\S]{0,200}console\.warn/,
     );

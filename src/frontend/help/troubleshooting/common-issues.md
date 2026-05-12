@@ -17,23 +17,23 @@ related:
 - You've exceeded the monthly budget cap (`BUDGET_CAP_MONTHLY`). Check `/api/stats` for `monthlySpend` vs `budgetCap`.
 - There are no work signals to generate from (no Linear issues, Slack activity, or incidents in the scan window).
 
-**Fix:** Trigger a manual generation from the briefing page or call `POST /api/briefing/generate`. Check the response for specific errors.
+**Fix:** Click **Generate now** at the top of the feed (or call `POST /api/briefing/generate`). Check the response for specific errors.
 
-## "No new content today"
+## Empty run — "Nothing new surfaced" toast
 
-**Symptom:** The briefing page shows an explicit "No new content today" panel instead of teaching pieces.
+**Symptom:** You click **Generate now** and a quiet toast says nothing surfaced. The feed itself is unchanged.
 
-**Why this happens:** The cron ran successfully but found nothing worth a fresh piece — no new work signals, no adjacent reading material, no decaying concepts. This is the intentional empty state, not a bug. The briefing row exists with `metadata.reason = "no_candidates"` and zero teaching pieces.
+**Why this happens:** The on-demand run ran successfully but found nothing worth a fresh piece — no new work signals, no adjacent reading material, no decaying concepts. The briefing row exists with `metadata.reason = "no_candidates"` and zero teaching pieces. The feed is piece-first, so zero-piece briefings stay out of the visible list to avoid noise.
 
-**Fix:** None required. The next day's run will pick up new signal. If you want a piece anyway (e.g., to revisit a concept), click **Generate anyway** to trigger a manual run.
+**Fix:** None required. Tomorrow's scheduled run will try again with whatever has accumulated overnight. The bell also fires a `briefing_generation` notification with the outcome, so you can confirm in the tray later if you missed the toast.
 
-## "Briefing generation failed" / "Try again"
+## "Generation failed" toast
 
-**Symptom:** The briefing page shows a warning-styled "Briefing generation failed" panel.
+**Symptom:** A negative-tone toast appears after a Generate now run, and/or the bell shows a failed `briefing_generation` notification.
 
-**Why this happens:** Candidates were selected for teaching pieces but every LLM call errored — usually transient (provider blip, network timeout, rate limit). The briefing row carries `metadata.reason = "all_pieces_failed"`.
+**Why this happens:** Candidates were selected for teaching pieces but every LLM call errored — usually transient (provider blip, network timeout, rate limit). The briefing row carries `metadata.reason = "all_pieces_failed"`. Other reasons that surface here: `monthly_budget_exceeded` (raise `BUDGET_CAP_MONTHLY` or wait for billing cycle reset) and `cancelled` (a previous run was cancelled before it finished).
 
-**Fix:** Click **Try again**. If it persists, check `/api/health` and the worker logs. Other reasons that surface here: `monthly_budget_exceeded` (raise `BUDGET_CAP_MONTHLY` or wait for billing cycle reset) and `cancelled` (a previous run was cancelled before it finished).
+**Fix:** Click **Generate now** again. If it persists, check `/api/health` and the worker logs.
 
 ## Partial Briefing
 

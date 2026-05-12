@@ -88,10 +88,12 @@ describe("cancel storage model", () => {
     expect(loopMatch?.[0]).toContain("await checkCancelled");
   });
 
-  it("useBriefing.cancel optimistically sets cancelling state", async () => {
+  it("useGeneration.cancel optimistically sets cancelling state", async () => {
     // User feedback requirement: clicking Cancel must immediately indicate
     // that the click registered, not wait for the next server poll.
-    const src = await readRepoFile("src/frontend/hooks/useBriefing.ts");
+    // (Generation lifecycle moved out of useBriefing into useGeneration
+    // so it could be decoupled from any specific date.)
+    const src = await readRepoFile("src/frontend/hooks/useGeneration.ts");
     const cancelFn = src.match(/const cancel = useCallback\([\s\S]*?\}, \[\]\);/);
     expect(cancelFn, "cancel callback should exist").not.toBeNull();
     expect(cancelFn?.[0]).toContain("setCancelling(true)");
@@ -99,9 +101,11 @@ describe("cancel storage model", () => {
     expect(cancelFn?.[0]).toMatch(/cancelRequested: true/);
   });
 
-  it("BriefingPage disables the Cancel button while cancelling", async () => {
-    const src = await readRepoFile("src/frontend/pages/BriefingPage.tsx");
-    // The button gets disabled + label flips to "Cancelling…"
+  it("GenerationProgress disables the Cancel button while cancelling", async () => {
+    // The cancel button lives in the GenerationProgress panel that
+    // the BriefingFeed mounts above the date sections. The disabled
+    // + "Cancelling…" verbiage is the user-visible contract.
+    const src = await readRepoFile("src/frontend/components/GenerationProgress.tsx");
     expect(src).toMatch(/disabled=\{cancelling\}/);
     expect(src).toMatch(/\{cancelling \? "Cancelling…" : "Cancel"\}/);
   });

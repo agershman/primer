@@ -282,8 +282,11 @@ describe("slack_filter step is wired into every pipeline-step list", () => {
     expect(src).toMatch(/"work_context",\s*\n\s*"slack_filter",\s*\n\s*"concepts"/);
   });
 
-  it("appears in the BriefingPage GENERATION_STEPS timeline with a source-neutral label", async () => {
-    const src = await read("src/frontend/pages/BriefingPage.tsx");
+  it("appears in the GenerationProgress GENERATION_STEPS timeline with a source-neutral label", async () => {
+    // The GENERATION_STEPS array moved out of BriefingPage when the
+    // progress panel was extracted into its own component so both
+    // the feed (root view) and any future surface could reuse it.
+    const src = await read("src/frontend/components/GenerationProgress.tsx");
     // Display label deliberately stays source-neutral ("Filtering source
     // data") even though the internal step_key is `slack_filter` —
     // makes the timeline forward-compatible if/when we filter other
