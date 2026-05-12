@@ -27,6 +27,14 @@ related:
 
 **Fix:** None required. Tomorrow's scheduled run will try again with whatever has accumulated overnight. The bell also fires a `briefing_generation` notification with the outcome, so you can confirm in the tray later if you missed the toast.
 
+## Empty run — "We drafted some pieces, but they overlapped with recent teaching" toast
+
+**Symptom:** You click **Generate now**, the progress panel runs through all its steps (including **Writing pieces N of M**), and at the end a quiet toast says drafts overlapped with recent teaching. No new section appears in the feed.
+
+**Why this happens:** The pipeline did real work — it selected candidates and drafted pieces — but the **continuation classifier** matched every draft against a recent predecessor and filtered them all as REDUNDANT. The briefing row carries `metadata.reason = "all_drafts_redundant"` and the predecessor metadata is stored in `redundant_drafts`. This is distinct from `no_candidates` (where nothing surfaced upstream); the work happened, it just didn't yield anything novel.
+
+**Fix:** None required. Your existing teaching on those concepts is recent enough that the classifier sees no movement worth a follow-up piece. Wait for the daily cron, or for the underlying signal (issues / messages / feeds) to change enough that the classifier returns `ADDITIVE_CONTINUATION` or `NOVEL`.
+
 ## "Generation failed" toast
 
 **Symptom:** A negative-tone toast appears after a Generate now run, and/or the bell shows a failed `briefing_generation` notification.

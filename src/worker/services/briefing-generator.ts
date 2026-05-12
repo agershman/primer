@@ -1239,6 +1239,7 @@ export async function generateDailyBriefing(
       totalPieces,
       selectedCount: selected.length,
       errorCount: errors.length,
+      redundantCount: redundantDrafts.length,
     });
 
     await db

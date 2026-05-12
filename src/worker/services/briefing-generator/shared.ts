@@ -212,19 +212,31 @@ export function selectEnabledSingletons(
  * runs at all, so the (selected, errors) signal isn't meaningful for
  * them.
  */
-export type NoContentReason = "no_candidates" | "all_pieces_failed";
+export type NoContentReason = "no_candidates" | "all_pieces_failed" | "all_drafts_redundant";
 
 export function classifyNoContentReason(args: {
   totalPieces: number;
   selectedCount: number;
   errorCount: number;
+  /**
+   * Drafts the continuation classifier flagged as REDUNDANT with a
+   * recent piece. On an additive run with no novel content, every
+   * candidate ends up here — the work happened (pieces were drafted),
+   * but nothing got persisted because everything overlapped with
+   * existing teaching. We tag those runs distinctly so the UI can
+   * surface a more honest "drafted but overlapped" toast instead of
+   * the misleading "no_candidates" copy ("nothing surfaced").
+   */
+  redundantCount?: number;
 }): NoContentReason | null {
   if (args.totalPieces > 0) return null;
   if (args.selectedCount === 0) return "no_candidates";
   if (args.errorCount > 0) return "all_pieces_failed";
-  // Selected > 0 but no pieces and no errors shouldn't happen in
-  // practice — every selected candidate either persists a piece or
-  // pushes an error. Bucket as no_candidates so the user gets the
+  if ((args.redundantCount ?? 0) > 0) return "all_drafts_redundant";
+  // Selected > 0 but no pieces, no errors, no redundant drafts —
+  // shouldn't happen in practice (the generator always either persists
+  // a piece, pushes an error, or records a redundant predecessor per
+  // selected candidate). Bucket as no_candidates so the user gets the
   // calmer copy rather than a misleading "everything failed".
   return "no_candidates";
 }
