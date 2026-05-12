@@ -282,6 +282,16 @@ describe("Slack source — option plumbing", () => {
     expect(src).toMatch(/Bookmarked by a teammate/);
   });
 
+  it("forwards the bookmark flag as a first-class field on the emitted WorkContextItem", async () => {
+    // Downstream filters / extractors (`slack-relevance-filter`,
+    // `concept-extractor`, `briefing-generator`'s P1 bookmark tier)
+    // gate on `item.bookmarked`. If the source stops setting that
+    // field, bookmarks silently lose their opt-in semantics —
+    // pin it here so the wiring can't regress.
+    const src = await read("src/worker/sources/slack.ts");
+    expect(src).toMatch(/bookmarked:\s*thread\.bookmarked/);
+  });
+
   it("SlackPanel drops the toggle and shows an always-on info row instead", async () => {
     const src = await read("src/frontend/components/settings/panels/SlackPanel.tsx");
     // No more ToggleRow / includeBookmarked plumbing

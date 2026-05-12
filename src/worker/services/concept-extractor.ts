@@ -17,6 +17,11 @@ interface WorkContextItem {
   url?: string;
   description?: string;
   labels?: string[];
+  /** Mirrors `WorkContextItem.bookmarked` in `sources/types.ts` — set
+   *  by the Slack source when the message carries a `:bookmark:`
+   *  reaction. Used here to annotate the LLM prompt so the extractor
+   *  relaxes its substance bar on these explicitly-opted-in items. */
+  bookmarked?: boolean;
 }
 
 interface ExtractedConcept {
@@ -50,10 +55,17 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 function formatBatch(items: WorkContextItem[]): string {
   return items
-    .map(
-      (item) =>
-        `[${item.type}] ${item.title}${item.description ? `\n  ${item.description.slice(0, 300)}` : ""}${item.labels?.length ? `\n  Labels: ${item.labels.join(", ")}` : ""}`,
-    )
+    .map((item) => {
+      // Mark bookmarked items with an explicit, machine-readable
+      // sentinel the system prompt knows to look for. The 🔖 prefix
+      // already lives in the title for human display, but the LLM
+      // needs a distinct, named signal so it doesn't mistake the
+      // glyph for incidental decoration.
+      const bookmarkTag = item.bookmarked ? " [USER-BOOKMARKED]" : "";
+      const desc = item.description ? `\n  ${item.description.slice(0, 300)}` : "";
+      const labels = item.labels?.length ? `\n  Labels: ${item.labels.join(", ")}` : "";
+      return `[${item.type}]${bookmarkTag} ${item.title}${desc}${labels}`;
+    })
     .join("\n\n");
 }
 
@@ -122,6 +134,20 @@ the filter criteria should be deprioritized or omitted.
     : "";
 
   return `${aboutBlock}${focusBlock}${filterBlock}${suppressedBlock}Extract substantive technical concepts from work items.
+
+USER-BOOKMARKED ITEMS — items tagged \`[USER-BOOKMARKED]\` carry an
+explicit opt-in from the reader (they reacted \`:bookmark:\` to the
+Slack message). These are NOT optional inputs: you MUST emit at least
+one concept per bookmarked item, even if the message text is short,
+casual, or borderline against the substance bar below. The reader is
+telling you "give me something to learn from this." Find the closest
+underlying technology, technique, pattern, methodology, or domain
+area the bookmarked content gestures at (drawn from the title, body,
+or surrounding context), and emit it as a concept. If the only
+substantive angle is broader than the message itself, use the
+broader concept. The substance bar still applies to bookmarked items
+in the sense that you should never emit an org/process/ritual noun —
+but you must find SOMETHING teachable to anchor a piece on.
 
 SUBSTANCE BAR — a concept MUST clear this bar to be extracted:
 - It must be teachable as standalone subject matter — i.e. an experienced

@@ -425,6 +425,10 @@ export const slackProvider: SourceProvider = {
         title: finalTitle,
         url: thread.url,
         description: finalDescription,
+        // Carry the bookmark signal as a first-class field so the
+        // concept extractor + teaching-target selector can act on it
+        // without parsing the 🔖 title prefix.
+        bookmarked: thread.bookmarked || undefined,
       });
     }
 

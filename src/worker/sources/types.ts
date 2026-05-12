@@ -11,6 +11,15 @@ export interface WorkContextItem {
   labels?: string[];
   dueAt?: string | null;
   dueReason?: string | null;
+  /** True when the underlying source item carries an explicit
+   *  user-opt-in signal (today: a Slack `:bookmark:` reaction from the
+   *  Primer user). The briefing pipeline treats this as a strong
+   *  inclusion intent: the relevance filter bypasses, the concept
+   *  extractor relaxes its substance bar, and the teaching-target
+   *  selector promotes bookmarked-source concepts to a P1 tier that
+   *  bypasses the depth + recent-concept gates so a bookmarked
+   *  message reliably produces a teaching piece. */
+  bookmarked?: boolean;
 }
 
 export interface SourceInstanceRow {
