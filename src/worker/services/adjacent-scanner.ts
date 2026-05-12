@@ -104,6 +104,11 @@ async function fetchOneSource(
       env,
       db,
       userId,
+      // Feed-style providers (RSS / HN / ArXiv) routed through the
+      // adjacent scanner don't need the user's email; that field is
+      // consumed by singleton providers (e.g. Slack's bookmark scan)
+      // routed through `briefing-generator` with the real value.
+      userEmail: "",
       userSettings: {},
       sourceConfig: {},
       llm,

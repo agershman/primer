@@ -88,16 +88,20 @@ Choose how far back Primer looks when scanning Slack messages:
 
 ### Bookmarked messages (`:bookmark:` reaction)
 
-Toggle **Include `:bookmark:` reactions** to pull in any message in your monitored channels that has a `:bookmark:` reaction from anyone in the channel — even if it would otherwise be filtered out as too short or too noisy. The bookmark reaction is treated as an explicit "include this regardless" signal:
+The `:bookmark:` reaction is treated as an explicit "include this regardless" signal across two paths — both always on, no toggle:
 
-- The standard noise filter (`thanks`, `lgtm`, lone emoji, sub-15-character messages) is bypassed for bookmarked messages.
+1. **Anyone's bookmark in a monitored channel.** Any message in one of your configured channels with a `:bookmark:` reaction from any member is kept, even if it would otherwise be filtered as too short or too quiet.
+2. **Your bookmark in any public channel.** Any message in any public workspace channel that **you** reacted `:bookmark:` to is pulled into scope for your briefing — even if the channel isn't in your monitored list. Primer maps you to your Slack user id by your Primer email (via `users.lookupByEmail`) and walks `reactions.list` for that user.
+
+For both paths:
+- The standard noise filter (`thanks`, `lgtm`, lone emoji, sub-15-character messages) is bypassed.
 - The per-thread length floor (30 chars / 2+ messages) is bypassed for any thread that has a bookmarked message anywhere in it (root or reply).
-- Bookmarked threads sort to the top of the work-context bar and get a 🔖 prefix on their title so you can see at a glance which items the team flagged.
-- The description fed to the concept extractor includes an explicit "Bookmarked by a teammate (`:bookmark:` reaction)." note, so the LLM weights these messages as high-signal even when the text alone is brief.
+- Bookmarked threads sort to the top of the work-context bar and get a 🔖 prefix on their title.
+- The description fed to the concept extractor includes an explicit "Bookmarked by a teammate (`:bookmark:` reaction)." note so the LLM weights these as high-signal.
 
-The toggle is opt-in (default off) — turning it on essentially says "trust me when someone uses the `:bookmark:` reaction in these channels, surface that message even if my other filters wouldn't have caught it." Pairs well with narrow channel selections — pointing it at #eng-share or #good-reads where bookmarking is already part of the team's workflow tends to produce the best signal.
+Both paths respect the **History window** above — bookmarks on messages older than the window aren't pulled in. `reactions.list` doesn't expose when the reaction was added, so the message's own timestamp is the proxy. If you bookmark an old thread today intending to surface it, you'll need the message itself to fall inside the window.
 
-Today the bypass operates over the messages already pulled in by the **History window** above. Bookmarks on messages older than the window aren't yet retrieved (Slack's `search.messages` would unlock that, but requires the `search:read` scope which isn't on by default).
+Setup: add the `reactions:read` and `users:read.email` scopes to your Slack app — see [Slack app + token](/help/credentials/slack) for the full scope list. Without them, only the in-channel any-user path runs.
 
 ## Display Preferences
 

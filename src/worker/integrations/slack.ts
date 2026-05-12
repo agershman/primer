@@ -46,6 +46,21 @@ export function hasBookmarkReaction(message: { reactions?: SlackReaction[] }): b
 }
 
 /**
+ * Predicate — did the given Slack user id react `:bookmark:` to this
+ * message? Differs from `hasBookmarkReaction` (which is true for any
+ * reactor) by checking the `users[]` array on the bookmark reaction
+ * itself. Used by the cross-channel personal-bookmark scan: only the
+ * Primer user's own reactions promote a message into scope when it
+ * comes from outside the monitored channel list.
+ */
+export function hasBookmarkReactionFromUser(message: { reactions?: SlackReaction[] }, slackUserId: string): boolean {
+  if (!message.reactions || message.reactions.length === 0) return false;
+  const reaction = message.reactions.find((r) => r.name === BOOKMARK_REACTION_NAME);
+  if (!reaction) return false;
+  return reaction.users?.includes(slackUserId) ?? false;
+}
+
+/**
  * Build a Slack message permalink from a workspace domain, channel id, and
  * message timestamp. Slack permalinks follow a deterministic format:
  *
@@ -225,6 +240,87 @@ export class SlackClient {
       console.warn(`[slack] chat.getPermalink failed for ${channel}/${messageTs}:`, err);
       return undefined;
     }
+  }
+
+  /**
+   * Resolve a Slack user id from an email address. Used to map a
+   * Primer user → Slack user automatically so the cross-channel
+   * bookmark scan can filter `reactions.list` by that user.
+   *
+   * Requires the `users:read.email` scope. Returns `null` (instead of
+   * throwing) when the user isn't found or the scope is missing —
+   * callers want to soft-fail and skip the personal-bookmark path
+   * rather than break the whole Slack fetch.
+   */
+  async lookupUserByEmail(email: string): Promise<string | null> {
+    try {
+      const result = await this.apiCall<{ user: { id: string } }>("users.lookupByEmail", { email });
+      return result.user.id;
+    } catch (err) {
+      console.warn(`[slack] users.lookupByEmail failed for ${email}:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * List the items a Slack user has reacted to, paginated. Returns
+   * the message bodies with reactions inline (`full=true`), so the
+   * caller can filter to a specific reaction (e.g. `:bookmark:`)
+   * without an extra round-trip per item.
+   *
+   * `reactions.list` orders most-recent-reaction-first but exposes no
+   * reaction-added timestamp — callers wanting a time bound must use
+   * `message.ts` as a proxy. We cap pagination (default 5 × 100
+   * = 500 items) so a heavy reactor doesn't make this unbounded.
+   *
+   * Requires the `reactions:read` scope. Returns `[]` on auth /
+   * scope errors so the slack source can still surface the
+   * configured-channel results.
+   */
+  async listUserReactions(
+    userId: string,
+    opts: { maxPages?: number } = {},
+  ): Promise<Array<{ channel: string; message: SlackMessage }>> {
+    const maxPages = opts.maxPages ?? 5;
+    const items: Array<{ channel: string; message: SlackMessage }> = [];
+    let cursor: string | undefined;
+
+    for (let page = 0; page < maxPages; page++) {
+      const params: Record<string, string> = {
+        user: userId,
+        full: "true",
+        count: "100",
+      };
+      if (cursor) params.cursor = cursor;
+
+      try {
+        const result = await this.apiCall<{
+          items: Array<{
+            type: string;
+            channel?: string;
+            message?: SlackMessage;
+          }>;
+          response_metadata?: { next_cursor?: string };
+        }>("reactions.list", params);
+
+        for (const item of result.items) {
+          if (item.type === "message" && item.message && item.channel) {
+            items.push({ channel: item.channel, message: item.message });
+          }
+        }
+
+        cursor = result.response_metadata?.next_cursor;
+        if (!cursor) break;
+      } catch (err) {
+        // Soft-fail: missing `reactions:read` scope, or any other
+        // failure, leaves the cross-channel bookmark scan a no-op
+        // for this run. The configured-channel pipeline is unaffected.
+        console.warn(`[slack] reactions.list failed for user=${userId}:`, err);
+        break;
+      }
+    }
+
+    return items;
   }
 
   async listChannels(): Promise<Array<{ id: string; name: string; numMembers: number; topic: string }>> {

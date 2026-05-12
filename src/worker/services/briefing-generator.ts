@@ -115,7 +115,8 @@ export async function generateDailyBriefing(
   // not stamped on rows since it doesn't change topic selection.
   const personaRow = await db
     .prepare(
-      `SELECT u.current_focus_version_id AS focus_version_id,
+      `SELECT u.email AS email,
+              u.current_focus_version_id AS focus_version_id,
               fv.statement AS focus_statement,
               u.current_about_version_id AS about_version_id,
               av.statement AS about_statement
@@ -126,11 +127,13 @@ export async function generateDailyBriefing(
     )
     .bind(userId)
     .first<{
+      email: string | null;
       focus_version_id: string | null;
       focus_statement: string | null;
       about_version_id: string | null;
       about_statement: string | null;
     }>();
+  const userEmail = personaRow?.email ?? "";
   const focusVersionId = personaRow?.focus_version_id ?? null;
   const focusStatement = personaRow?.focus_statement ?? null;
   const aboutStatement = personaRow?.about_statement ?? null;
@@ -234,6 +237,7 @@ export async function generateDailyBriefing(
       env,
       db,
       userId,
+      userEmail,
       userSettings: userSettings ?? {},
       sourceConfig: surfaceMap,
       llm,
