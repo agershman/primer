@@ -3,16 +3,19 @@
  * `:bookmark:` reaction bypass and surrounding plumbing.
  *
  * Coverage:
- *   - `hasBookmarkReaction` reaction-name detection (integration helper)
- *   - `groupAndFilterSlackMessages`:
+ *   - `hasBookmarkReaction` reaction-name detection (any reactor)
+ *   - `hasBookmarkReactionFromUser` (specific reactor — used by the
+ *     cross-channel personal-bookmark scan)
+ *   - `groupAndFilterSlackMessages` internal grouping/filter logic:
  *     - default behavior (bookmarks are ignored, noise filter applies)
  *     - includeBookmarked: noise messages with :bookmark: are kept
  *     - includeBookmarked: short threads with a bookmarked root pass
  *       the per-thread length floor
  *     - bookmarked threads sort to the top
  *     - bookmark on a reply (not the root) still flags the thread
- *   - Source-text contracts that pin the option through the rest of
- *     the pipeline (config interface, manifest field, frontend panel)
+ *   - Source-text contracts pinning the always-on bookmark behavior
+ *     (no opt-in toggle; includeBookmarked: true is forced; the
+ *     SlackPanel shows an info row instead of a switch).
  */
 
 import { describe, it, expect } from "vitest";

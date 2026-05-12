@@ -126,17 +126,22 @@ describe("Slack credential doc", () => {
 
   it("documents every Slack method Primer calls + the matching scope", async () => {
     const src = await read("src/frontend/help/credentials/slack.md");
-    // Methods (must match the four surfaces in worker/integrations/slack.ts).
+    // Methods (must match the surfaces in worker/integrations/slack.ts).
     expect(src).toContain("conversations.list");
     expect(src).toContain("conversations.history");
     expect(src).toContain("conversations.replies");
     expect(src).toContain("team.info");
+    // Cross-channel personal-bookmark scan.
+    expect(src).toContain("users.lookupByEmail");
+    expect(src).toContain("reactions.list");
     // Optional fallback method.
     expect(src).toContain("search.messages");
     // Scopes that map to those methods.
     expect(src).toContain("channels:read");
     expect(src).toContain("channels:history");
     expect(src).toContain("team:read");
+    expect(src).toContain("reactions:read");
+    expect(src).toContain("users:read.email");
     expect(src).toContain("search:read");
   });
 
