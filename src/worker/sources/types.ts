@@ -26,6 +26,13 @@ export interface SourceContext {
   env: Env;
   db: D1Database;
   userId: string;
+  /**
+   * Primary email for the Primer user. Source providers use this when
+   * they need to resolve the Primer user → some external-system user
+   * (e.g. Slack's `users.lookupByEmail` for the cross-channel bookmark
+   * scan). Always populated at the call sites that build the context.
+   */
+  userEmail: string;
   userSettings: UserSettings;
   sourceConfig: Record<string, unknown>;
 }

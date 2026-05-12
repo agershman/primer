@@ -2,6 +2,7 @@ import { resolveModel } from "../config/models.js";
 import {
   buildSlackPermalink,
   hasBookmarkReaction,
+  hasBookmarkReactionFromUser,
   normalizeSlackText,
   SlackClient,
   type SlackReaction,
@@ -160,16 +161,31 @@ export const slackProvider: SourceProvider = {
     const slackFilters = (sourceConfig.slack ?? {}) as {
       channels?: string[];
       historyDays?: number;
-      includeBookmarked?: boolean;
     };
 
     const client = new SlackClient(ctx.env.SLACK_TOKEN);
     const configuredChannels = slackFilters.channels;
-    const includeBookmarked = !!slackFilters.includeBookmarked;
+
+    // Window applies to both the configured-channel pull AND the
+    // cross-channel bookmark scan — bookmarks on messages older
+    // than the window are dropped so the work-context bar doesn't
+    // accumulate permanent residents. `reactions.list` exposes no
+    // reaction-added timestamp, so `message.ts` is the proxy.
+    const historyDays = slackFilters.historyDays ?? 1;
+    const sinceTs = Math.floor(Date.now() / 1000) - historyDays * 86400;
+    const sinceTsStr = String(sinceTs);
+
+    // Resolve the Primer user → Slack user id once per fetch via
+    // email match. Soft-fail: when this returns null (missing
+    // `users:read.email` scope, no matching workspace user, OR the
+    // user's Primer email differs from their Slack one), the
+    // cross-channel bookmark scan becomes a no-op and we fall back
+    // to the configured-channel pipeline unchanged.
+    const slackUserId = ctx.userEmail ? await client.lookupUserByEmail(ctx.userEmail) : null;
 
     let rawThreads: SlackThread[];
 
-    if (configuredChannels?.length) {
+    if (configuredChannels?.length || slackUserId) {
       // Try team.info for the workspace domain. Fast path: if it
       // works (token has `team:read`), we can build all permalinks
       // locally with zero extra API calls. If it fails, the
@@ -192,38 +208,81 @@ export const slackProvider: SourceProvider = {
         );
       }
 
-      const historyDays = slackFilters.historyDays ?? 1;
-      const sinceTs = String(Math.floor(Date.now() / 1000) - historyDays * 86400);
       const allMessages: RawSlackMessage[] = [];
+      // De-dupe key: (channel, ts). A message bookmarked by the user
+      // inside a monitored channel would otherwise land in
+      // `allMessages` twice — once from `getChannelHistorySince`
+      // and once from `reactions.list` — and confuse the grouping
+      // step.
+      const seen = new Set<string>();
+      const push = (msg: RawSlackMessage) => {
+        const channelKey = msg.channel ?? "";
+        const key = `${channelKey}:${msg.ts}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        allMessages.push(msg);
+      };
 
-      for (const channelId of configuredChannels) {
-        try {
-          const msgs = await client.getChannelHistorySince(channelId, sinceTs);
-          for (const m of msgs) {
-            allMessages.push({
-              ...m,
-              channel: channelId,
-              permalink: m.permalink ?? buildSlackPermalink(teamDomain, channelId, m.ts),
-              // `conversations.history` returns reactions inline by
-              // default — preserve them through the pipeline so the
-              // grouping step can detect bookmarks.
-              reactions: m.reactions,
-            });
+      if (configuredChannels?.length) {
+        for (const channelId of configuredChannels) {
+          try {
+            const msgs = await client.getChannelHistorySince(channelId, sinceTsStr);
+            for (const m of msgs) {
+              push({
+                ...m,
+                channel: channelId,
+                permalink: m.permalink ?? buildSlackPermalink(teamDomain, channelId, m.ts),
+                // `conversations.history` returns reactions inline by
+                // default — preserve them through the pipeline so the
+                // grouping step can detect bookmarks.
+                reactions: m.reactions,
+              });
+            }
+          } catch (err) {
+            console.error(`[slack] Failed to fetch channel ${channelId}:`, err);
           }
-        } catch (err) {
-          console.error(`[slack] Failed to fetch channel ${channelId}:`, err);
         }
       }
 
-      rawThreads = groupAndFilterSlackMessages(allMessages, { includeBookmarked });
+      // Always-on cross-channel personal-bookmark scan: pull every
+      // message the Primer user reacted `:bookmark:` to, filter to
+      // those inside the history window, and merge them into the
+      // pool. Bookmarks on messages already pulled by the channel
+      // history above are deduped by `push`. Soft-fails to empty
+      // when `reactions:read` is missing — see `listUserReactions`.
+      if (slackUserId) {
+        try {
+          const reactionItems = await client.listUserReactions(slackUserId);
+          for (const item of reactionItems) {
+            const msg = item.message;
+            const tsNumber = Number.parseFloat(msg.ts);
+            if (!Number.isFinite(tsNumber) || tsNumber < sinceTs) continue;
+            if (!hasBookmarkReactionFromUser(msg, slackUserId)) continue;
+            push({
+              text: msg.text,
+              ts: msg.ts,
+              user: msg.user,
+              channel: item.channel,
+              thread_ts: msg.thread_ts,
+              permalink: msg.permalink ?? buildSlackPermalink(teamDomain, item.channel, msg.ts),
+              reactions: msg.reactions,
+            });
+          }
+        } catch (err) {
+          console.error("[slack] Cross-channel bookmark scan failed:", err);
+        }
+      }
+
+      rawThreads = groupAndFilterSlackMessages(allMessages, { includeBookmarked: true });
     } else {
-      // search.messages doesn't return reaction data, so the bookmark
-      // bypass is a no-op on this fallback path. Pass the option
-      // through anyway for symmetry — adding a `has::bookmark:` query
-      // here is a cleanish future extension when search:read is
-      // available.
+      // No configured channels and no resolvable Slack user — last-
+      // resort fallback to `search.messages from:me` so the source
+      // still produces something. Bookmarks aren't available on this
+      // path (search.messages doesn't return reactions), but the
+      // grouping step still treats anything that arrives here as
+      // bookmark-eligible for filter-bypass semantics symmetry.
       const searchResults = await client.searchMessages("from:me", 20);
-      rawThreads = groupAndFilterSlackMessages(searchResults, { includeBookmarked });
+      rawThreads = groupAndFilterSlackMessages(searchResults, { includeBookmarked: true });
     }
 
     interface EnrichedThread {
@@ -414,13 +473,6 @@ export const slackProvider: SourceProvider = {
         { value: "14", label: "14 days" },
       ],
       default: "7",
-    },
-    {
-      type: "toggle",
-      key: "includeBookmarked",
-      label: "Include bookmarked messages",
-      hint: "Pull in any message in your monitored channels reacted with :bookmark: — even if it would otherwise be filtered as too short or too noisy.",
-      default: false,
     },
   ],
 };

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChannelPicker } from "../../ChannelPicker";
 import { useSettingsCtx } from "../SettingsContext";
-import { Card, Field, PanelHeader, SelectedSummary, SourceEnabledRow, ToggleRow, useSourceEnabled } from "../shared";
+import { Card, Field, PanelHeader, SelectedSummary, SourceEnabledRow, useSourceEnabled } from "../shared";
 import { InScopePreview, ScopeRow } from "./InScopePreview";
 
 const HISTORY_OPTIONS = [
@@ -44,7 +44,6 @@ export function SlackPanel() {
     channels: [] as string[],
     channelNames: [] as string[],
     historyDays: 7,
-    includeBookmarked: false,
   };
   const slack = { ...slackDefaults, ...(data.signalSurfaceMap?.slack ?? {}) };
   const updateSlack = (partial: Partial<typeof slack>) => {
@@ -118,28 +117,18 @@ export function SlackPanel() {
           <Field
             label="Bookmarked messages"
             hint={
-              // Match Slack's actual UX language: in Slack, bookmarking
-              // is the colloquial verb for the :bookmark: reaction. Show
-              // the rendered emoji alongside the literal shortcode so the
-              // user sees both what it looks like and what to type.
               <>
-                Pull in any message in your monitored channels reacted with <BookmarkReactionTag /> — even if it would
-                otherwise be filtered as too short or too quiet. Bookmarked messages bypass the noise / brevity filters
-                and sort to the top of the work-context bar.
+                Any message reacted with <BookmarkReactionTag /> is always in scope — yours in any public channel
+                (resolved via your Primer email against the Slack workspace), and anyone's reactions in the channels
+                above. Bookmarked messages bypass the noise / brevity filters and sort to the top of the work-context
+                bar.
               </>
             }
           >
             <Card>
-              <ToggleRow
-                label={
-                  <>
-                    Include <BookmarkReactionTag /> reactions
-                  </>
-                }
-                checked={!!slack.includeBookmarked}
-                onChange={(v) => updateSlack({ includeBookmarked: v })}
-                last
-              />
+              <div className="px-3 py-2 text-[11px] font-mono text-text-secondary">
+                <BookmarkReactionTag /> reactions are always in scope — no setting to flip.
+              </div>
             </Card>
           </Field>
 

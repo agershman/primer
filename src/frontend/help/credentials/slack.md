@@ -19,9 +19,11 @@ The integration calls these Slack Web API methods:
 | **`conversations.history`** | Every briefing | Pulling messages from each configured channel within the configured time window. |
 | **`conversations.replies`** | Every briefing | Fetching thread replies for substantive conversations. |
 | **`team.info`** | First request | Resolving your workspace's domain so message permalinks can be rendered. |
-| **`search.messages`** | Briefings, only when configured | A fallback path that searches `from:me` to surface messages you sent across channels. Optional — if you only configure explicit channel IDs, this method is never called. |
+| **`users.lookupByEmail`** | Every briefing | Mapping the Primer user to their Slack user id (by email) so the cross-channel bookmark scan knows whose reactions to pull. |
+| **`reactions.list`** | Every briefing | Listing the Primer user's reacted-to messages so any `:bookmark:` they added in any public channel is pulled into scope, not just messages from monitored channels. |
+| **`search.messages`** | Briefings, fallback only | Used only when no channels are configured AND the email→user lookup fails. Searches `from:me`. |
 
-Reactions (including the optional `:bookmark:` bypass — see [Configuration → Bookmarked messages](/help/reference/configuration)) are read **inline** from `conversations.history` — Primer does not call `reactions.get`.
+Reactions in monitored channels (any user's `:bookmark:`) are read **inline** from `conversations.history` — Primer does not call `reactions.get`. Reactions in non-monitored channels are discovered via `reactions.list` against the resolved Slack user id.
 
 The integration is strictly read-only. No `chat.postMessage`, no message edits, no reactions added.
 
@@ -59,10 +61,14 @@ If you need the `search.messages` path: scroll down to **User Token Scopes** in 
 | **`channels:read`** | List public channels (drives the Settings picker) | Yes |
 | **`channels:history`** | Read messages + thread replies in public channels | Yes |
 | **`team:read`** | Read workspace info (used to render message permalinks) | Yes |
-| **`search:read`** | Search messages (only needed if you want the `from:me` fallback) | Optional |
+| **`reactions:read`** | Discover the Primer user's `:bookmark:` reactions across all public channels (cross-channel bookmark scan) | Yes |
+| **`users:read.email`** | Resolve the Primer user → Slack user id by email so the bookmark scan knows whose reactions to pull | Yes |
+| **`search:read`** | Search messages (only needed for the legacy `from:me` fallback when no channels are configured AND email lookup fails) | Optional |
 | **`groups:history`** + **`groups:read`** | Read **private** channels the bot is invited to | Optional |
 
-All four `channels:*` / `team:*` scopes are public-channel-scoped. Add the `groups:*` pair only if you want Primer to read private channels — and remember the bot still has to be invited to each one.
+The `channels:*` / `team:*` / `reactions:read` / `users:read.email` scopes are public-channel-scoped. Add the `groups:*` pair only if you want Primer to read private channels — and remember the bot still has to be invited to each one.
+
+Without `reactions:read` + `users:read.email`, the cross-channel bookmark scan becomes a no-op and bookmarks are only picked up inside the monitored channel list (read inline from `conversations.history`). The fetch still succeeds — just with a smaller scope.
 
 Primer does **not** need `chat:write`, `users:read`, or any write-capable scope. If you see those listed by mistake, remove them.
 

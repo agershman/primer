@@ -3,16 +3,19 @@
  * `:bookmark:` reaction bypass and surrounding plumbing.
  *
  * Coverage:
- *   - `hasBookmarkReaction` reaction-name detection (integration helper)
- *   - `groupAndFilterSlackMessages`:
+ *   - `hasBookmarkReaction` reaction-name detection (any reactor)
+ *   - `hasBookmarkReactionFromUser` (specific reactor — used by the
+ *     cross-channel personal-bookmark scan)
+ *   - `groupAndFilterSlackMessages` internal grouping/filter logic:
  *     - default behavior (bookmarks are ignored, noise filter applies)
  *     - includeBookmarked: noise messages with :bookmark: are kept
  *     - includeBookmarked: short threads with a bookmarked root pass
  *       the per-thread length floor
  *     - bookmarked threads sort to the top
  *     - bookmark on a reply (not the root) still flags the thread
- *   - Source-text contracts that pin the option through the rest of
- *     the pipeline (config interface, manifest field, frontend panel)
+ *   - Source-text contracts pinning the always-on bookmark behavior
+ *     (no opt-in toggle; includeBookmarked: true is forced; the
+ *     SlackPanel shows an info row instead of a switch).
  */
 
 import { describe, it, expect } from "vitest";
@@ -20,6 +23,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   hasBookmarkReaction,
+  hasBookmarkReactionFromUser,
   BOOKMARK_REACTION_NAME,
 } from "../../src/worker/integrations/slack";
 import { groupAndFilterSlackMessages } from "../../src/worker/sources/slack";
@@ -59,6 +63,59 @@ describe("hasBookmarkReaction", () => {
         reactions: [{ name: "bookmark_tabs", count: 1 }],
       }),
     ).toBe(false);
+  });
+});
+
+describe("hasBookmarkReactionFromUser", () => {
+  it("matches when the given user id appears in the bookmark reaction's users[]", () => {
+    expect(
+      hasBookmarkReactionFromUser(
+        {
+          reactions: [
+            { name: "bookmark", count: 2, users: ["U1", "U2"] },
+          ],
+        },
+        "U2",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false when a different user reacted but not the given one", () => {
+    expect(
+      hasBookmarkReactionFromUser(
+        {
+          reactions: [{ name: "bookmark", count: 1, users: ["U1"] }],
+        },
+        "U2",
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false when the bookmark reaction has no users[] field", () => {
+    expect(
+      hasBookmarkReactionFromUser(
+        {
+          reactions: [{ name: "bookmark", count: 1 }],
+        },
+        "U1",
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false when the message has reactions but none are :bookmark:", () => {
+    expect(
+      hasBookmarkReactionFromUser(
+        {
+          reactions: [{ name: "eyes", count: 1, users: ["U1"] }],
+        },
+        "U1",
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false when reactions are absent / empty", () => {
+    expect(hasBookmarkReactionFromUser({}, "U1")).toBe(false);
+    expect(hasBookmarkReactionFromUser({ reactions: [] }, "U1")).toBe(false);
   });
 });
 
@@ -192,25 +249,31 @@ describe("groupAndFilterSlackMessages — includeBookmarked bypass", () => {
 });
 
 describe("Slack source — option plumbing", () => {
-  it("source provider declares includeBookmarked as a toggle field with default false", async () => {
+  it("source provider no longer declares the includeBookmarked toggle", async () => {
     const src = await read("src/worker/sources/slack.ts");
-    expect(src).toMatch(/type:\s*"toggle"/);
-    expect(src).toMatch(/key:\s*"includeBookmarked"/);
-    expect(src).toMatch(/default:\s*false/);
-    // The fetcher reads the flag from the per-user config blob
-    expect(src).toMatch(/includeBookmarked\?:\s*boolean/);
-    expect(src).toMatch(/includeBookmarked\s*=\s*!!slackFilters\.includeBookmarked/);
+    // The opt-in toggle is gone — bookmark-bypass is built-in now.
+    expect(src).not.toMatch(/key:\s*"includeBookmarked"/);
+    expect(src).not.toMatch(/!!slackFilters\.includeBookmarked/);
   });
 
-  it("source fetch threads reactions through to the grouping step", async () => {
+  it("source fetch threads reactions through and always passes includeBookmarked: true", async () => {
     const src = await read("src/worker/sources/slack.ts");
     // Reactions field gets carried from the Slack API response into
     // the message buffer that `groupAndFilterSlackMessages` sees.
     expect(src).toMatch(/reactions:\s*m\.reactions/);
-    // Both call sites pass the option through (channel-history path
-    // and the from:me search fallback)
-    const withOption = src.match(/groupAndFilterSlackMessages\([^)]+\{ includeBookmarked \}\)/g);
-    expect(withOption?.length ?? 0).toBeGreaterThanOrEqual(2);
+    // Both call sites force the bypass on unconditionally — the
+    // user-curated bookmark is, by construction, an explicit signal.
+    const trueCalls = src.match(/groupAndFilterSlackMessages\([^)]+\{\s*includeBookmarked:\s*true\s*\}\)/g);
+    expect(trueCalls?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+
+  it("fetch resolves the Slack user id and uses listUserReactions for cross-channel bookmarks", async () => {
+    const src = await read("src/worker/sources/slack.ts");
+    expect(src).toContain("lookupUserByEmail");
+    expect(src).toContain("listUserReactions");
+    expect(src).toContain("hasBookmarkReactionFromUser");
+    // The scan is scoped to the same `sinceTs` floor as channel history
+    expect(src).toMatch(/tsNumber\s*<\s*sinceTs/);
   });
 
   it("bookmarked threads get the 🔖 prefix and explicit description tag", async () => {
@@ -219,23 +282,20 @@ describe("Slack source — option plumbing", () => {
     expect(src).toMatch(/Bookmarked by a teammate/);
   });
 
-  it("SlackPanel renders the toggle and persists to settings.signalSurfaceMap.slack", async () => {
+  it("SlackPanel drops the toggle and shows an always-on info row instead", async () => {
     const src = await read("src/frontend/components/settings/panels/SlackPanel.tsx");
-    expect(src).toContain("ToggleRow");
-    expect(src).toContain("includeBookmarked");
-    // The toggle label is rendered via the BookmarkReactionTag helper
-    // (emoji + parens + inline-code styled `:bookmark:`) instead of a
-    // plain string, so we assert on the structural pieces.
-    expect(src).toMatch(/Include\s*<BookmarkReactionTag\s*\/>\s*reactions/);
-    // Default in the local merge — keeps existing users (no flag in
-    // their stored config) at false rather than undefined.
-    expect(src).toMatch(/includeBookmarked:\s*false/);
+    // No more ToggleRow / includeBookmarked plumbing
+    expect(src).not.toContain("ToggleRow");
+    expect(src).not.toContain("includeBookmarked");
+    // Field still renders with the BookmarkReactionTag and an
+    // "always in scope" message in the card.
+    expect(src).toMatch(/always in scope/i);
   });
 
   it("BookmarkReactionTag pairs the 🔖 emoji with the literal :bookmark: shortcode in inline-code styling", async () => {
     const src = await read("src/frontend/components/settings/panels/SlackPanel.tsx");
-    // Helper exists and is used in both the field hint AND the toggle
-    // label (so the user sees the emoji + shortcode in both spots).
+    // Helper exists and is used in both the field hint AND the info
+    // card body (so the user sees the emoji + shortcode in both spots).
     expect(src).toContain("function BookmarkReactionTag");
     const usages = src.match(/<BookmarkReactionTag\s*\/>/g) ?? [];
     expect(usages.length).toBeGreaterThanOrEqual(2);
