@@ -299,7 +299,7 @@ const DEFAULT_SETTINGS: UserSettingsData = {
   filterPrompt: null,
   sourceFilterOverrides: {},
   enabledSourceIds: [],
-  showAuditMarks: true,
+  showAuditMarks: false,
 };
 
 export function useSettings(): UseSettingsResult {

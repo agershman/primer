@@ -8,6 +8,10 @@ interface UserSettings {
   nearMissFloor: number;
   retentionDays: number;
   signalSurfaceMap: Record<string, unknown>;
+  // Seeds TeachingPiece's per-piece marksVisible state on mount.
+  // Default-off (the indicator pill is already prominent; inline
+  // wavy underlines are opt-in via the indicator dropdown).
+  showAuditMarks?: boolean;
 }
 
 export interface CurrentUser {

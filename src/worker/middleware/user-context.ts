@@ -164,10 +164,12 @@ export const userContext = createMiddleware<{
     filterPrompt: settingsRow?.filter_prompt ?? null,
     sourceFilterOverrides,
     enabledSourceIds,
-    // Defaults true when the column is null (the migration ALTERs
-    // with DEFAULT 1, but a fresh row written by user-provision
-    // before this branch lands might be undefined in flight).
-    showAuditMarks: settingsRow?.show_audit_marks == null ? true : Number(settingsRow.show_audit_marks) === 1,
+    // Defaults FALSE when the column is null. The audit indicator
+    // pill already surfaces "Audited · N dropped" prominently —
+    // inline wavy underlines on top of that are distracting noise
+    // for everyday reading. Users opt-in per piece via the
+    // indicator dropdown's "Show audit marks" toggle.
+    showAuditMarks: settingsRow?.show_audit_marks == null ? false : Number(settingsRow.show_audit_marks) === 1,
   };
 
   c.set("user", {

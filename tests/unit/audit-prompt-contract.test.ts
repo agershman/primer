@@ -53,4 +53,17 @@ describe("audit prompt + model catalog contract", () => {
     expect(src).toMatch(/audit:\s*"claude-haiku-4-5-20251001"/);
     expect(src).toMatch(/auditPatch:\s*"claude-sonnet-4-20250514"/);
   });
+
+  it("classifyBlock prompt instructs the auditor to reject sub-sentence noun phrases", async () => {
+    // Pins the v2 prompt-tightening: the classifier sometimes flagged
+    // a 1-3 word noun phrase ("service dependencies") even though
+    // the surrounding sentence was general engineering knowledge.
+    // The remediation has two layers — a prompt instruction (this
+    // assertion) and the `isTooShortToBeClaim` post-filter (covered
+    // in `piece-auditor.test.ts`). Both must hold for the user-
+    // visible regression to stay fixed.
+    const src = await read("src/worker/services/piece-auditor.ts");
+    expect(src).toMatch(/Reject isolated nouns or noun phrases/);
+    expect(src).toMatch(/at least one full clause/);
+  });
 });

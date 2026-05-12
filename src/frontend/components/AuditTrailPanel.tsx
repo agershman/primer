@@ -112,23 +112,35 @@ export function AuditTrailPanel({
       }}
     >
       <div
-        className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-surface p-6 shadow-xl"
+        className="audit-trail-panel max-h-[90vh] w-[calc(100%-1rem)] sm:w-full max-w-2xl mx-2 sm:mx-0 overflow-y-auto rounded-lg border border-border bg-surface p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-2 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-text-primary">Audit trail</h2>
           <button type="button" className="text-text-dim hover:text-text-primary" onClick={onClose} aria-label="Close">
             ✕
           </button>
         </div>
 
+        <p className="mb-4 text-sm text-text-secondary">
+          Every factual claim in this content was checked against the source bundle. Un-cited claims also got a
+          web-search backstop. Below is each pass — what was flagged, how it resolved, and the evidence the auditor
+          used.
+        </p>
+
         {loading ? <p className="text-text-dim">Loading audit details…</p> : null}
         {error ? <p className="text-negative">Could not load audit trail: {error}</p> : null}
 
         {trail ? (
           trail.passes.length === 0 ? (
-            <p className="text-text-dim">No audit ran on this content. It may pre-date the audit feature.</p>
+            <div className="rounded-lg border border-border-subtle bg-bg-warm p-4">
+              <p className="mb-1 text-sm font-medium text-text-primary">No audit on this content</p>
+              <p className="text-sm text-text-secondary">
+                This piece predates the audit feature, so no claim-level trail was recorded. Newer pieces will show
+                their full audit history here.
+              </p>
+            </div>
           ) : (
             trail.passes.map((pass) => (
               <section key={pass.pass} className="mb-6">

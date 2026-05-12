@@ -136,3 +136,55 @@ describe("Writing pieces progress label", () => {
     expect(`Writing ${rangeLabel(0, 4)} of 4`).not.toMatch(/pieces \d-\d/);
   });
 });
+
+/**
+ * Audit phase progress visibility.
+ *
+ * The briefing generator's `generating_pieces` step covers BOTH the
+ * writer call (per-piece generation) and the auditor call (claim
+ * classification + patch + pass-2). Without a sub-label, the user
+ * just sees "Writing pieces 1 and 2 of 4: …" for the entire batch
+ * even though audit is the slowest sub-step. The fix is a second
+ * `updateProgress` call after the write completes that swaps the
+ * label to "Auditing pieces …" before the audit pass runs.
+ *
+ * These tests pin the label format so a future refactor can't
+ * silently revert to "Writing" being the only visible state.
+ */
+describe("Auditing pieces progress label", () => {
+  function rangeLabel(ti: number, total: number, batchSize = 2): string {
+    const start = ti + 1;
+    const end = Math.min(ti + batchSize, total);
+    return start === end ? `piece ${start}` : `pieces ${start} and ${end}`;
+  }
+
+  it("uses 'Auditing pieces N and M of T' for multi-piece batches", () => {
+    expect(`Auditing ${rangeLabel(0, 4)} of 4`).toBe("Auditing pieces 1 and 2 of 4");
+    expect(`Auditing ${rangeLabel(2, 4)} of 4`).toBe("Auditing pieces 3 and 4 of 4");
+  });
+
+  it("uses singular 'Auditing piece N of T' on a tail-end batch of one", () => {
+    expect(`Auditing ${rangeLabel(4, 5)} of 5`).toBe("Auditing piece 5 of 5");
+  });
+
+  it("audit label shares the `generating_pieces` step key (no new top-level step)", async () => {
+    // The progress step key MUST stay `generating_pieces` — adding a
+    // top-level "auditing" step would break the static
+    // GENERATION_STEPS list in routes/analytics.ts and skew the
+    // BriefingWaterfall column count. Audit is a sub-phase of
+    // piece generation, not its own pipeline phase.
+    const src = await import("node:fs/promises").then((m) =>
+      m.readFile(new URL("../../src/worker/services/briefing-generator.ts", import.meta.url), "utf-8"),
+    );
+    expect(src).toMatch(/`Auditing \$\{range\} of \$\{selected\.length\}/);
+    // The Auditing call must use the same step key as Writing.
+    const match = src.match(/`Auditing \$\{range\} of \$\{selected\.length\}.*?\)/s);
+    expect(match).not.toBeNull();
+    // The first arg pair before this template is db + briefingId,
+    // followed by the step key. Just verify "generating_pieces"
+    // appears in the same `await updateProgress(` call.
+    expect(src).toMatch(
+      /updateProgress\([\s\S]*?"generating_pieces",[\s\S]*?`Auditing \$\{range\} of \$\{selected\.length\}/,
+    );
+  });
+});

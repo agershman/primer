@@ -110,6 +110,93 @@ interface PatchDecision {
 
 const CLEAN_RESOLUTIONS: Set<AuditVerdict> = new Set(["grounded", "grounded-web"]);
 
+const VERDICT_SEVERITY: Record<AuditVerdict, number> = {
+  grounded: 0,
+  "grounded-web": 1,
+  unsupported: 2,
+  hallucinated: 3,
+};
+
+/**
+ * Keep only non-overlapping claim spans within each block. Two
+ * overlapping spans, if both fed into `applyResolutions`, would
+ * splice through each other and produce smeared tokens like
+ * "dataad balancer" (regression we shipped in v1). When two spans
+ * overlap we keep the one with the more severe verdict, breaking
+ * ties by larger span, then earlier start. The loser is dropped
+ * entirely (not recorded in the trail) — the more-severe overlapping
+ * claim is the one a reviewer cares about.
+ *
+ * Exported for unit tests in `tests/unit/piece-auditor.test.ts`.
+ */
+export function dedupeOverlappingClaims<
+  T extends { block_index: number; span_start: number; span_end: number; verdict: AuditVerdict },
+>(claims: T[]): T[] {
+  const byBlock = new Map<number, T[]>();
+  for (const c of claims) {
+    const list = byBlock.get(c.block_index) ?? [];
+    list.push(c);
+    byBlock.set(c.block_index, list);
+  }
+  const out: T[] = [];
+  for (const [, blockClaims] of byBlock) {
+    const ranked = [...blockClaims].sort((a, b) => {
+      const sev = VERDICT_SEVERITY[b.verdict] - VERDICT_SEVERITY[a.verdict];
+      if (sev !== 0) return sev;
+      const size = b.span_end - b.span_start - (a.span_end - a.span_start);
+      if (size !== 0) return size;
+      return a.span_start - b.span_start;
+    });
+    const kept: Array<{ start: number; end: number }> = [];
+    for (const c of ranked) {
+      // Half-open overlap: [a.start, a.end) ∩ [b.start, b.end) ≠ ∅
+      // iff c.start < kept.end && c.end > kept.start.
+      const overlaps = kept.some((iv) => c.span_start < iv.end && c.span_end > iv.start);
+      if (overlaps) continue;
+      kept.push({ start: c.span_start, end: c.span_end });
+      out.push(c);
+    }
+  }
+  return out;
+}
+
+/**
+ * Reject patch rewrites that look corrupt before they get spliced
+ * into the rendered text. An empty string, or one containing nul /
+ * non-whitespace control characters, indicates the patch model
+ * returned garbage; falling back to a drop yields a defensible
+ * piece rather than a mid-word smear.
+ *
+ * Exported for unit tests.
+ */
+/**
+ * Reject sub-clause noun-phrase spans the classifier sometimes emits
+ * (e.g. "service dependencies", "load balancer"). A real claim is a
+ * full assertion — at minimum it should have a verb. We use a cheap
+ * word-count threshold rather than a parser: spans with fewer than 4
+ * whitespace-separated tokens are almost always noun phrases.
+ *
+ * Exported for unit tests.
+ */
+export function isTooShortToBeClaim(text: string): boolean {
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  return tokens.length < 4;
+}
+
+export function isInvalidPatchText(text: string | undefined | null): boolean {
+  if (typeof text !== "string") return true;
+  if (text.length === 0) return true;
+  // Disallow ASCII control chars except tab (0x09), LF (0x0A), CR (0x0D).
+  // We walk the string by char code rather than a regex literal so the
+  // source file stays free of embedded non-printable bytes.
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0x09 || code === 0x0a || code === 0x0d) continue;
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
 /**
  * Build the enrichment-id allowlist for a source bundle. Mirrors the
  * `${type}:${id}` convention writers use in `[[ref:...]]` tags. Sources
@@ -162,7 +249,9 @@ async function classifyBlock(
     "  - hallucinated: the claim appears to be invented or contradicts the sources.\n\n" +
     "Rules:\n" +
     "  - Only emit claims for sentences that make a verifiable factual assertion. Skip framing, transitions, and opinions.\n" +
+    "  - A `claim_text` span MUST cover a complete factual assertion, not a bare noun phrase. Reject isolated nouns or noun phrases (e.g. 'service dependencies', 'load balancer', 'orchestrators') unless the surrounding sentence asserts a specific verifiable fact about them. If the only verifiable content is general engineering knowledge, mark the surrounding claim 'grounded' rather than flagging the phrase.\n" +
     "  - Offsets MUST index into the passage's `text` string (start = first character of the claim, end = one past the last character — half-open [start, end)).\n" +
+    "  - Spans must cover at least one full clause — typically 4+ words. Sub-sentence fragments are not auditable claims.\n" +
     "  - `cited_refs` MUST be drawn from the allowed list; any other value is invalid.\n" +
     "  - When the passage contains inline `[[ref:<id>]]` markers right after a sentence, treat that as the writer's claim of citation and check whether the matching source actually supports it.\n";
 
@@ -202,13 +291,23 @@ async function classifyBlock(
     if (end <= start) continue;
     const verdict = (raw.verdict ?? "grounded") as AuditVerdict;
     if (!["grounded", "unsupported", "hallucinated"].includes(verdict)) continue;
+    const claimText = block.value.slice(start, end);
+    // Defense-in-depth backstop for the prompt rule above: drop spans
+    // that are too short to be a clause. The model occasionally still
+    // flags a 1–3 word noun phrase ("service dependencies") even when
+    // the prompt says not to; an inline wavy underline on those reads
+    // as bogus to the user since the underlined text isn't a claim.
+    // Grounded claims don't produce a mark, so this filter only
+    // matters for unsupported / hallucinated verdicts — applying it
+    // uniformly keeps the trail consistent.
+    if (isTooShortToBeClaim(claimText)) continue;
     // Drop refs the auditor invented; keep ones from the allowlist.
     const refs = (raw.cited_refs ?? []).filter((r): r is string => typeof r === "string" && allowedSet.has(r));
     claims.push({
       block_index: blockIndex,
       span_start: start,
       span_end: end,
-      claim_text: block.value.slice(start, end),
+      claim_text: claimText,
       verdict,
       cited_refs: refs,
       reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
@@ -311,9 +410,18 @@ function applyResolutions(
       text = text.slice(0, c.span_start) + text.slice(c.span_end);
       updated.push({ ...c, resolution: "dropped", patched_text: null });
     } else if (patch.kind === "rewrite") {
-      const newText = patch.text ?? "";
-      text = text.slice(0, c.span_start) + newText + text.slice(c.span_end);
-      updated.push({ ...c, resolution: "patched", patched_text: newText });
+      // Reject a corrupt rewrite (empty / control chars) and fall back
+      // to a drop. Without this guard, a patch model returning ""
+      // would splice an empty string into the middle of a sentence,
+      // potentially merging adjacent words into garbage tokens.
+      if (isInvalidPatchText(patch.text)) {
+        text = text.slice(0, c.span_start) + text.slice(c.span_end);
+        updated.push({ ...c, resolution: "dropped", patched_text: null });
+      } else {
+        const newText = patch.text as string;
+        text = text.slice(0, c.span_start) + newText + text.slice(c.span_end);
+        updated.push({ ...c, resolution: "patched", patched_text: newText });
+      }
     }
   }
 
@@ -538,9 +646,17 @@ export async function auditContent(args: AuditContentArgs): Promise<AuditContent
       }
     }
 
+    // ── Dedupe overlapping spans before patch ──
+    // Two overlapping claims on the same block would splice through
+    // each other in applyResolutions (the "dataad balancer"
+    // regression). Drop the lower-severity claim before we spend
+    // patch tokens on a span we'd just corrupt anyway. Runs after
+    // web-search so a claim that got upgraded to grounded-web is no
+    // longer in scope for the overlap check.
+    const dedupedClaims = dedupeOverlappingClaims(passOneClaims);
     // ── Patch flagged spans ──
     type PatchedClaim = ResolvedClaim & { _patch?: PatchDecision };
-    const patchedClaims: PatchedClaim[] = passOneClaims.map((c) => ({ ...c }));
+    const patchedClaims: PatchedClaim[] = dedupedClaims.map((c) => ({ ...c }));
     for (const claim of patchedClaims) {
       if (claim.verdict !== "unsupported" && claim.verdict !== "hallucinated") continue;
       try {
@@ -646,10 +762,14 @@ export async function auditContent(args: AuditContentArgs): Promise<AuditContent
           }
         }
         // Drop any still-flagged spans (pass-2 fallback per spec).
+        // Same overlap guard as pass 1 — without it, two overlapping
+        // pass-2 spans would smear through each other when both get
+        // the `drop` decoration below.
+        const dedupedPassTwo = dedupeOverlappingClaims(passTwoClaims);
         const updatedContentAfterPass2: ContentBlock[] = [...updatedContent];
         const finalPassTwoClaims: ResolvedClaim[] = [];
         const passTwoByBlock = new Map<number, ResolvedClaim[]>();
-        for (const c of passTwoClaims) {
+        for (const c of dedupedPassTwo) {
           const list = passTwoByBlock.get(c.block_index) ?? [];
           list.push(c);
           passTwoByBlock.set(c.block_index, list);
