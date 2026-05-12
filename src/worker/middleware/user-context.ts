@@ -125,6 +125,7 @@ export const userContext = createMiddleware<{
     filter_prompt: string | null;
     source_filter_overrides: string | null;
     enabled_source_ids: string | null;
+    show_audit_marks: number;
   }>();
 
   let sourceFilterOverrides: Record<string, string> = {};
@@ -163,6 +164,10 @@ export const userContext = createMiddleware<{
     filterPrompt: settingsRow?.filter_prompt ?? null,
     sourceFilterOverrides,
     enabledSourceIds,
+    // Defaults true when the column is null (the migration ALTERs
+    // with DEFAULT 1, but a fresh row written by user-provision
+    // before this branch lands might be undefined in flight).
+    showAuditMarks: settingsRow?.show_audit_marks == null ? true : Number(settingsRow.show_audit_marks) === 1,
   };
 
   c.set("user", {

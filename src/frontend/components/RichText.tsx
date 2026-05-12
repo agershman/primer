@@ -5,10 +5,101 @@ import { dispatchPrimerEvent, onPrimerEvent } from "../lib/events";
 import type { ContentBlock } from "../types";
 import { Tooltip } from "./Tooltip";
 
+/**
+ * Per-block audit highlight range. Drives the wavy-underline mark
+ * the auditor's verdict produces inline on each claim. Offsets are
+ * into the post-strip `value` of the block (the auditor strips the
+ * writer's `[[ref:...]]` markers before persisting so coordinates
+ * here line up with the rendered DOM).
+ */
+export interface AuditHighlightRange {
+  start: number;
+  end: number;
+  verdict: "grounded" | "grounded-web" | "unsupported" | "hallucinated";
+  claimId: string;
+  /** When the claim was patched (rather than left as-is), draw the
+   *  mark with the "patched" style — same color as unsupported but
+   *  a double underline. */
+  patched?: boolean;
+}
+
 interface RichTextProps {
   blocks: ContentBlock[];
   bookmarkedBlock?: number | null;
   onBookmarkBlock?: (blockIndex: number) => void;
+  /**
+   * Auditor-flagged ranges keyed by block index. Each range becomes a
+   * clickable wavy-underline mark; clicking fires `audit-mark-clicked`
+   * via the typed event bus. Pass null / omit when the user has hidden
+   * marks via Settings → "Show audit marks inline".
+   */
+  highlightedRanges?: Record<number, AuditHighlightRange[]> | null;
+  /** Routes click events on the wavy underline through the bus. */
+  auditTarget?: { kind: "piece" | "deep_dive" | "quiz"; id: string };
+}
+
+/**
+ * Wrap `parseInlineMarkup`'s output with audit-mark overlays. Spans
+ * are applied right-to-left so DOM-build offsets stay stable when
+ * two ranges land in the same block. Ranges that overlap (rare,
+ * pathological) are de-conflicted by sorting + last-write-wins.
+ */
+function renderTextWithAuditMarks(
+  text: string,
+  ranges: AuditHighlightRange[],
+  auditTarget: { kind: "piece" | "deep_dive" | "quiz"; id: string },
+): ReactNode[] {
+  if (ranges.length === 0) return parseInlineMarkup(text);
+  // Sort ascending so we splice left-to-right; collapse overlaps by
+  // letting earlier-starting ranges win.
+  const sorted = [...ranges].sort((a, b) => a.start - b.start || a.end - b.end);
+  const out: ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+  for (const r of sorted) {
+    const start = Math.max(cursor, Math.min(text.length, r.start));
+    const end = Math.max(start, Math.min(text.length, r.end));
+    if (end <= start) continue;
+    if (start > cursor) {
+      out.push(...parseInlineMarkup(text.slice(cursor, start)));
+    }
+    const verdictClass = r.patched ? "audit-mark-patched" : `audit-mark-${r.verdict}`;
+    out.push(
+      <span
+        key={`mark-${key++}-${r.claimId}`}
+        className={`audit-mark ${verdictClass}`}
+        role="button"
+        tabIndex={0}
+        data-claim-id={r.claimId}
+        onClick={(e) => {
+          dispatchPrimerEvent("audit-mark-clicked", {
+            targetKind: auditTarget.kind,
+            targetId: auditTarget.id,
+            claimId: r.claimId,
+            anchor: e.currentTarget as HTMLElement,
+          });
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            dispatchPrimerEvent("audit-mark-clicked", {
+              targetKind: auditTarget.kind,
+              targetId: auditTarget.id,
+              claimId: r.claimId,
+              anchor: e.currentTarget as HTMLElement,
+            });
+          }
+        }}
+      >
+        {parseInlineMarkup(text.slice(start, end))}
+      </span>,
+    );
+    cursor = end;
+  }
+  if (cursor < text.length) {
+    out.push(...parseInlineMarkup(text.slice(cursor)));
+  }
+  return out;
 }
 
 function parseInlineMarkup(text: string): ReactNode[] {
@@ -479,11 +570,12 @@ export function CodeBlock({ value, language }: { value: string; language?: strin
   );
 }
 
-export function RichText({ blocks, bookmarkedBlock, onBookmarkBlock }: RichTextProps) {
+export function RichText({ blocks, bookmarkedBlock, onBookmarkBlock, highlightedRanges, auditTarget }: RichTextProps) {
   return (
     <div className="space-y-3">
       {blocks.map((block, i) => {
         const isBookmarked = bookmarkedBlock === i;
+        const blockRanges = highlightedRanges?.[i] ?? null;
         const bookmarkBtn = onBookmarkBlock ? (
           <button
             onClick={() => onBookmarkBlock(i)}
@@ -509,7 +601,11 @@ export function RichText({ blocks, bookmarkedBlock, onBookmarkBlock }: RichTextP
           return (
             <div key={i} className="group relative">
               {bookmarkBtn}
-              <p className="font-ui text-sm font-semibold text-text-primary mt-4 first:mt-0">{block.value}</p>
+              <p className="font-ui text-sm font-semibold text-text-primary mt-4 first:mt-0">
+                {blockRanges && blockRanges.length > 0 && auditTarget
+                  ? renderTextWithAuditMarks(block.value, blockRanges, auditTarget)
+                  : block.value}
+              </p>
             </div>
           );
         }
@@ -532,7 +628,11 @@ export function RichText({ blocks, bookmarkedBlock, onBookmarkBlock }: RichTextP
         return (
           <div key={i} className="group relative">
             {bookmarkBtn}
-            <p className="font-body text-base leading-relaxed text-text-secondary">{parseInlineMarkup(block.value)}</p>
+            <p className="font-body text-base leading-relaxed text-text-secondary">
+              {blockRanges && blockRanges.length > 0 && auditTarget
+                ? renderTextWithAuditMarks(block.value, blockRanges, auditTarget)
+                : parseInlineMarkup(block.value)}
+            </p>
           </div>
         );
       })}

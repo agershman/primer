@@ -163,6 +163,7 @@ pieceDeepDiveRoutes.get("/piece/:id/deep-dive", async (c) => {
   const fullPiece = await db
     .prepare(
       `SELECT tp.title, tp.content, tp.concepts, tp.source_type, tp.model_used,
+              tp.source_context,
               COALESCE(cd.depth_score, 0) as depth_score
        FROM teaching_pieces tp
        LEFT JOIN concept_depth cd ON cd.concept_id = (
@@ -178,6 +179,7 @@ pieceDeepDiveRoutes.get("/piece/:id/deep-dive", async (c) => {
       source_type: string;
       model_used: string | null;
       depth_score: number;
+      source_context: string | null;
     }>();
 
   if (!fullPiece) {
@@ -268,12 +270,18 @@ pieceDeepDiveRoutes.get("/piece/:id/deep-dive", async (c) => {
       const { genId } = await import("../../db/queries.js");
 
       const llm = llmClient(c.env);
-      const spec = resolveModel(
-        user.settings?.signalSurfaceMap as Record<string, unknown> | null | undefined,
-        "deepDive",
-      );
+      const surfaceMap = user.settings?.signalSurfaceMap as Record<string, unknown> | null | undefined;
+      const spec = resolveModel(surfaceMap, "deepDive");
+      const auditSpec = resolveModel(surfaceMap, "audit");
+      const auditPatchSpec = resolveModel(surfaceMap, "auditPatch");
 
       const existingContent: import("../../types.js").ContentBlock[] = JSON.parse(fullPiece.content || "[]");
+      // Parse the parent piece's source bundle once — threaded into
+      // both the writer (for inline [[ref:...]] tags) and the auditor
+      // (for verification against the same sources the parent claimed
+      // to derive from).
+      const parentSources: Array<{ type: string; id?: string; url?: string; title?: string; summary?: string }> =
+        JSON.parse(fullPiece.source_context ?? "[]");
 
       console.log(`[deep-dive] starting generation for ${pieceId} (provider=${spec.provider}, model=${spec.model})`);
       const result = await generateDeepDive(
@@ -283,8 +291,23 @@ pieceDeepDiveRoutes.get("/piece/:id/deep-dive", async (c) => {
         fullPiece.title,
         fullPiece.depth_score,
         existingContent,
-        { modelSpec: spec, aboutStatement: user.aboutStatement },
+        { modelSpec: spec, aboutStatement: user.aboutStatement, sources: parentSources },
       );
+
+      // Audit the deep dive against the parent's source bundle + the
+      // web-search backstop. Fail-open: the auditor swallows its own
+      // exceptions and returns the original content with status='failed'.
+      const { auditDeepDive } = await import("../../services/piece-auditor.js");
+      const audited = await auditDeepDive({
+        db,
+        userId: user.userId,
+        llm,
+        targetId: pieceId,
+        content: result.content,
+        sources: parentSources,
+        auditSpec,
+        patchSpec: auditPatchSpec,
+      });
 
       await db
         .prepare(
@@ -292,7 +315,7 @@ pieceDeepDiveRoutes.get("/piece/:id/deep-dive", async (c) => {
              SET deep_dive_content = ?, deep_dive_read_time = ?, has_deep_dive = 1
            WHERE id = ? AND user_id = ?`,
         )
-        .bind(JSON.stringify(result.content), result.readTimeMinutes, pieceId, user.userId)
+        .bind(JSON.stringify(audited.content), result.readTimeMinutes, pieceId, user.userId)
         .run();
 
       for (let i = 0; i < result.resources.length; i++) {
@@ -331,7 +354,7 @@ pieceDeepDiveRoutes.get("/piece/:id/deep-dive", async (c) => {
       return {
         status: "ready",
         readTime: result.readTimeMinutes,
-        content: result.content,
+        content: audited.content,
         resources: insertedResources.results ?? [],
       };
     } catch (err) {

@@ -26,6 +26,17 @@ export interface DeepDiveOptions {
   modelSpec?: ModelSpec;
   /** "About me" persona — tailors voice / depth assumptions to the reader. */
   aboutStatement?: string | null;
+  /**
+   * Source bundle inherited from the parent teaching piece. Before the
+   * audit feature deep dives received only `conceptName + parent text`
+   * — every factual claim was effectively unanchored. Threading the
+   * parent's `source_context` here lets the writer cite the same
+   * underlying signals via `[[ref:...]]` tags, and the auditor verifies
+   * against the same bundle. Optional because the regenerate path can
+   * still call us without sources; the auditor will then rely on its
+   * web-search backstop instead.
+   */
+  sources?: Array<{ type: string; id?: string; url?: string; title?: string; summary?: string }>;
 }
 
 function defaultDeepDiveSpec(): ModelSpec {
@@ -71,6 +82,13 @@ CITATIONS AND LINKS:
 - If you are uncertain whether something is accurate, qualify it rather than asserting it as fact.
 - Resources at the end should be pages the reader can actually learn from.
 
+INLINE REF TAGS — anchoring claims to the parent piece's source bundle:
+- When a sentence makes a factual claim that comes from the source bundle below (the same one that drove the parent teaching piece), append an inline ref tag at the end of that sentence using the format \`[[ref:<enrichment-id>]]\`.
+- The \`<enrichment-id>\` MUST be one of the allowed IDs supplied in the user message — do NOT invent IDs.
+- Place the tag IMMEDIATELY before the closing punctuation. The frontend strips the tags from rendered text and uses them to drive the audit indicator + per-claim popover.
+- If a claim is background knowledge the source bundle doesn't speak to, DO NOT add a tag — the auditor will flag fabricated citations. The auditor will instead use a web-search backstop to verify un-tagged claims.
+- Apply to \`text\` and \`heading\` blocks only. Do NOT embed tags in \`code\` or \`diagram\` blocks.
+
 GLOSSARY TERMS — define jargon the reader (per ABOUT) might not know:
 - Wrap any term, acronym, or phrase the reader might not know in the marker [[term||short definition]]. The frontend renders these as the term with a dotted underline; hovering shows the definition in a tooltip.
 - Definitions should be ≤25 words, plain language, and self-contained (no nested markers, no links inside).
@@ -103,12 +121,26 @@ Include at least one diagram (type "diagram" with mermaid syntax) or code block 
     .join(" ")
     .slice(0, 500);
 
+  // Mirror teaching-generator: surface the allowed enrichment IDs the
+  // writer can use in `[[ref:...]]` tags.
+  const allowedRefs = (options.sources ?? [])
+    .map((s) => {
+      const key = s.id ?? s.url;
+      if (!key) return null;
+      return `  - ${s.type}:${key}${s.title ? ` — ${s.title}` : ""}`;
+    })
+    .filter((line): line is string => line !== null);
+  const allowedRefsBlock =
+    allowedRefs.length > 0
+      ? `\n\nAllowed [[ref:...]] IDs (use any sentence-tag verbatim from this list, no others):\n${allowedRefs.join("\n")}`
+      : "";
+
   const userMessage = `Write a deep-dive expansion for "${conceptName}".
 
 The reader already saw this summary:
 "${existingSummary}"
 
-Now go deeper. Cover implementation details, edge cases, tradeoffs, and real-world patterns.`;
+Now go deeper. Cover implementation details, edge cases, tradeoffs, and real-world patterns.${allowedRefsBlock}`;
 
   const { result, usage } = await llm.generateJson<{
     content: ContentBlock[];

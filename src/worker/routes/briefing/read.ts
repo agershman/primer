@@ -11,13 +11,39 @@
  */
 
 import { Hono } from "hono";
-import type { Env, UserContext } from "../../types.js";
+import type { AuditSummary, Env, UserContext } from "../../types.js";
 import { shiftDate, userToday } from "../../util/time.js";
 import { isZombie, parseRedundantDrafts, todayFor } from "./shared.js";
 
 type AppEnv = { Bindings: Env; Variables: { user: UserContext } };
 
 export const briefingReadRoutes = new Hono<AppEnv>();
+
+/**
+ * Reshape the flat `audit_*` / `dd_audit_*` columns emitted by the
+ * LEFT JOIN on `audits` into the nested `AuditSummary` the wire
+ * contract expects. Returns null when no audit row was joined (piece
+ * pre-dates the audit feature, or audit failed before persisting).
+ *
+ * `prefix` is either `"audit"` for the piece-content audit or
+ * `"dd_audit"` for the deep-dive content audit on the same row.
+ */
+function buildAuditSummary(piece: Record<string, unknown>, prefix: "audit" | "dd_audit"): AuditSummary | null {
+  const status = piece[`${prefix}_status`] as AuditSummary["status"] | null;
+  if (!status) return null;
+  return {
+    status,
+    audit_model: (piece[`${prefix}_model`] as string) ?? "",
+    patch_model: (piece[`${prefix}_patch_model`] as string | null) ?? null,
+    used_web_search: Number(piece[`${prefix}_used_web_search`] ?? 0) === 1,
+    total_claims: Number(piece[`${prefix}_total_claims`] ?? 0),
+    unsupported_count: Number(piece[`${prefix}_unsupported_count`] ?? 0),
+    hallucinated_count: Number(piece[`${prefix}_hallucinated_count`] ?? 0),
+    grounded_web_count: Number(piece[`${prefix}_grounded_web_count`] ?? 0),
+    patched_count: Number(piece[`${prefix}_patched_count`] ?? 0),
+    dropped_count: Number(piece[`${prefix}_dropped_count`] ?? 0),
+  };
+}
 
 briefingReadRoutes.get("/briefing/today", async (c) => {
   const user = c.get("user");
@@ -69,7 +95,52 @@ briefingReadRoutes.get("/briefing/today", async (c) => {
     return c.json({ briefing: null, pieces: [], quiz: null });
   }
 
-  const pieces = await c.env.DB.prepare("SELECT * FROM teaching_pieces WHERE briefing_id = ? ORDER BY position DESC")
+  // LEFT-JOIN the latest pass-1 audit row per piece (and per
+  // deep-dive when present) so the briefing-read response carries
+  // an `audit_summary` rollup inline — no per-piece N+1. The
+  // correlated subquery picks `pass = MAX(pass)` so when pass 2
+  // ran (the auditor patched something and re-checked) we surface
+  // the LATEST verdict, not the pre-patch pass 1 numbers.
+  const pieces = await c.env.DB.prepare(
+    `SELECT tp.*,
+            a_piece.status AS audit_status,
+            a_piece.audit_model AS audit_model,
+            a_piece.patch_model AS audit_patch_model,
+            a_piece.used_web_search AS audit_used_web_search,
+            a_piece.total_claims AS audit_total_claims,
+            a_piece.unsupported_count AS audit_unsupported_count,
+            a_piece.hallucinated_count AS audit_hallucinated_count,
+            a_piece.grounded_web_count AS audit_grounded_web_count,
+            a_piece.patched_count AS audit_patched_count,
+            a_piece.dropped_count AS audit_dropped_count,
+            a_dd.status AS dd_audit_status,
+            a_dd.audit_model AS dd_audit_model,
+            a_dd.patch_model AS dd_audit_patch_model,
+            a_dd.used_web_search AS dd_audit_used_web_search,
+            a_dd.total_claims AS dd_audit_total_claims,
+            a_dd.unsupported_count AS dd_audit_unsupported_count,
+            a_dd.hallucinated_count AS dd_audit_hallucinated_count,
+            a_dd.grounded_web_count AS dd_audit_grounded_web_count,
+            a_dd.patched_count AS dd_audit_patched_count,
+            a_dd.dropped_count AS dd_audit_dropped_count
+       FROM teaching_pieces tp
+       LEFT JOIN audits a_piece
+         ON a_piece.target_kind = 'piece'
+        AND a_piece.target_id = tp.id
+        AND a_piece.pass = (
+          SELECT MAX(pass) FROM audits
+           WHERE target_kind = 'piece' AND target_id = tp.id
+        )
+       LEFT JOIN audits a_dd
+         ON a_dd.target_kind = 'deep_dive'
+        AND a_dd.target_id = tp.id
+        AND a_dd.pass = (
+          SELECT MAX(pass) FROM audits
+           WHERE target_kind = 'deep_dive' AND target_id = tp.id
+        )
+      WHERE tp.briefing_id = ?
+      ORDER BY tp.position DESC`,
+  )
     .bind(briefing.id)
     .all();
 
@@ -109,6 +180,8 @@ briefingReadRoutes.get("/briefing/today", async (c) => {
         resources: resources.results,
         model_used: (piece.model_used as string | null) ?? null,
         source_context: JSON.parse((piece.source_context as string) || "[]"),
+        audit_summary: buildAuditSummary(piece, "audit"),
+        deep_dive_audit_summary: buildAuditSummary(piece, "dd_audit"),
       };
     }),
   );
@@ -217,7 +290,52 @@ briefingReadRoutes.get("/briefing/:date", async (c) => {
     return c.json({ error: "No briefing for this date" }, 404);
   }
 
-  const pieces = await c.env.DB.prepare("SELECT * FROM teaching_pieces WHERE briefing_id = ? ORDER BY position DESC")
+  // LEFT-JOIN the latest pass-1 audit row per piece (and per
+  // deep-dive when present) so the briefing-read response carries
+  // an `audit_summary` rollup inline — no per-piece N+1. The
+  // correlated subquery picks `pass = MAX(pass)` so when pass 2
+  // ran (the auditor patched something and re-checked) we surface
+  // the LATEST verdict, not the pre-patch pass 1 numbers.
+  const pieces = await c.env.DB.prepare(
+    `SELECT tp.*,
+            a_piece.status AS audit_status,
+            a_piece.audit_model AS audit_model,
+            a_piece.patch_model AS audit_patch_model,
+            a_piece.used_web_search AS audit_used_web_search,
+            a_piece.total_claims AS audit_total_claims,
+            a_piece.unsupported_count AS audit_unsupported_count,
+            a_piece.hallucinated_count AS audit_hallucinated_count,
+            a_piece.grounded_web_count AS audit_grounded_web_count,
+            a_piece.patched_count AS audit_patched_count,
+            a_piece.dropped_count AS audit_dropped_count,
+            a_dd.status AS dd_audit_status,
+            a_dd.audit_model AS dd_audit_model,
+            a_dd.patch_model AS dd_audit_patch_model,
+            a_dd.used_web_search AS dd_audit_used_web_search,
+            a_dd.total_claims AS dd_audit_total_claims,
+            a_dd.unsupported_count AS dd_audit_unsupported_count,
+            a_dd.hallucinated_count AS dd_audit_hallucinated_count,
+            a_dd.grounded_web_count AS dd_audit_grounded_web_count,
+            a_dd.patched_count AS dd_audit_patched_count,
+            a_dd.dropped_count AS dd_audit_dropped_count
+       FROM teaching_pieces tp
+       LEFT JOIN audits a_piece
+         ON a_piece.target_kind = 'piece'
+        AND a_piece.target_id = tp.id
+        AND a_piece.pass = (
+          SELECT MAX(pass) FROM audits
+           WHERE target_kind = 'piece' AND target_id = tp.id
+        )
+       LEFT JOIN audits a_dd
+         ON a_dd.target_kind = 'deep_dive'
+        AND a_dd.target_id = tp.id
+        AND a_dd.pass = (
+          SELECT MAX(pass) FROM audits
+           WHERE target_kind = 'deep_dive' AND target_id = tp.id
+        )
+      WHERE tp.briefing_id = ?
+      ORDER BY tp.position DESC`,
+  )
     .bind(briefing.id)
     .all();
 
@@ -235,6 +353,8 @@ briefingReadRoutes.get("/briefing/:date", async (c) => {
         resources: resources.results,
         model_used: (piece.model_used as string | null) ?? null,
         source_context: JSON.parse((piece.source_context as string) || "[]"),
+        audit_summary: buildAuditSummary(piece, "audit"),
+        deep_dive_audit_summary: buildAuditSummary(piece, "dd_audit"),
       };
     }),
   );

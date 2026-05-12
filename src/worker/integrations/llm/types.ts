@@ -93,6 +93,33 @@ export interface ToolDef {
 
 export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | null;
 
+/**
+ * Server-tool requests are provider-hosted tools that run inside the
+ * provider's stack (no round trip back to us between the model call
+ * and the tool execution). `web_search` is the only kind supported
+ * today — Anthropic's `web_search_20250305` and OpenAI's hosted
+ * Responses-API `web_search` both translate from this normalized
+ * spec at the adapter layer.
+ *
+ * Distinct from regular `ToolDef` because server tools are NOT
+ * callable from the host — we don't supply an `input_schema` or
+ * receive `tool_use` blocks to dispatch on. The provider runs them
+ * transparently and surfaces results inline in the assistant message.
+ */
+export type ServerToolSpec = { kind: "web_search"; maxUses?: number };
+
+/**
+ * Normalized result of a hosted web_search call. Both providers
+ * surface citations inline in the assistant response; the adapter
+ * extracts them into this shape so callers (today: the
+ * piece-auditor) don't need to know which provider answered.
+ */
+export interface WebSearchResult {
+  url: string;
+  title: string;
+  snippet?: string;
+}
+
 export interface NormalizedMessageResponse {
   id: string;
   /** Resolved model id from the provider (may differ from `spec.model` if
@@ -101,6 +128,11 @@ export interface NormalizedMessageResponse {
   content: ContentBlock[];
   stopReason: StopReason;
   usage: NormalizedUsage;
+  /** Web-search citations the provider gathered while answering, when
+   *  `serverTools` included `web_search`. Empty array when no server
+   *  tools were requested, when the model didn't invoke them, or when
+   *  the provider returned no citations. */
+  webSearchResults?: WebSearchResult[];
 }
 
 /**
@@ -131,6 +163,11 @@ export interface CreateMessageOptions {
   system?: string;
   messages: ChatMessage[];
   tools?: ToolDef[];
+  /** Provider-hosted server tools (e.g. `web_search`). Distinct from
+   *  `tools` — adapters translate this to the provider's native
+   *  hosted-tool format and we don't dispatch on the returned blocks;
+   *  the provider runs them transparently. See `ServerToolSpec`. */
+  serverTools?: ServerToolSpec[];
   /** Override `spec.maxTokens`. Some callers prefer to keep `spec` fixed
    *  per use-case and pass tokens per-call. */
   maxTokens?: number;

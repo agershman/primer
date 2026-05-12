@@ -42,12 +42,21 @@ describe("inline visual aides", () => {
 
   it("worker/types.ts re-exports ContentBlock from the shared module", async () => {
     const src = await readRepoFile("src/worker/types.ts");
-    expect(src).toMatch(/export type \{[\s\S]{0,80}ContentBlock[\s\S]{0,80}\}\s*from\s*"\.\.\/shared\/types"/);
+    // See sibling assertion for `frontend/types.ts` — widened to
+    // accommodate the audit type re-exports (AuditSummary,
+    // AuditTrail, etc.).
+    expect(src).toMatch(/export type \{[\s\S]{0,300}ContentBlock[\s\S]{0,300}\}\s*from\s*"\.\.\/shared\/types"/);
   });
 
   it("frontend/types.ts re-exports ContentBlock from the shared module", async () => {
     const src = await readRepoFile("src/frontend/types.ts");
-    expect(src).toMatch(/export type \{[\s\S]{0,80}ContentBlock[\s\S]{0,80}\}\s*from\s*"\.\.\/shared\/types"/);
+    // Widened from 80 → 300 chars after the export-list grew to
+    // include the audit types (AuditSummary, AuditTrail, etc. —
+    // see migration 0007 + ADR 0007). The invariant being pinned
+    // is "ContentBlock is re-exported from shared/types", not
+    // "the re-export list is short", so the larger window is
+    // appropriate.
+    expect(src).toMatch(/export type \{[\s\S]{0,300}ContentBlock[\s\S]{0,300}\}\s*from\s*"\.\.\/shared\/types"/);
   });
 
   it("deep-dive prompt uses inline content for diagrams, not visualAides", async () => {

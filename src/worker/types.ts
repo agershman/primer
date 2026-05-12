@@ -75,6 +75,14 @@ export interface UserSettings {
    * of bug that costs us.
    */
   enabledSourceIds?: SourceId[];
+  /**
+   * Per-user toggle for the inline wavy-underline audit marks on
+   * teaching pieces, deep dives, and quizzes. Defaults to true (the
+   * audit signal is the headline trust feature; users opt out for
+   * distraction-free reading). The `AuditIndicator` pill stays
+   * visible regardless — only the inline marks are gated.
+   */
+  showAuditMarks?: boolean;
 }
 
 export function resolveFilterPrompt(settings: UserSettings, sourceId?: string): string | null {
@@ -159,4 +167,18 @@ export interface UserContext {
 // `from "../types"`) keep working without a tree-wide rewrite, and
 // so adding a new resource type in one place actually changes both
 // sides at type-check time.
-export type { ContentBlock, Resource } from "../shared/types";
+// Audit shapes — same rationale as ContentBlock / Resource above. Live
+// in the shared module because they cross the wire on
+// `GET /api/.../audit` and (as inline summaries) on every briefing
+// read response.
+export type {
+  AuditClaim,
+  AuditResolution,
+  AuditSummary,
+  AuditTargetKind,
+  AuditTrail,
+  AuditVerdict,
+  ContentBlock,
+  Resource,
+  WebEvidence,
+} from "../shared/types";

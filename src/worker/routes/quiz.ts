@@ -22,6 +22,7 @@
 
 import { Hono } from "hono";
 import type { Env, UserContext } from "../types.js";
+import { quizAuditRoutes } from "./quiz/audit.js";
 import { quizBaselineRoutes } from "./quiz/baseline.js";
 import { quizInlineRoutes } from "./quiz/inline.js";
 
@@ -30,3 +31,4 @@ type AppEnv = { Bindings: Env; Variables: { user: UserContext } };
 export const quizRoutes = new Hono<AppEnv>();
 quizRoutes.route("/", quizInlineRoutes);
 quizRoutes.route("/", quizBaselineRoutes);
+quizRoutes.route("/", quizAuditRoutes);

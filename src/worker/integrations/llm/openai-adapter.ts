@@ -169,16 +169,35 @@ function buildMessages(system: string | undefined, messages: ChatMessage[]): Arr
   return out;
 }
 
-function buildTools(tools: ToolDef[] | undefined): Array<Record<string, unknown>> | undefined {
-  if (!tools || tools.length === 0) return undefined;
-  return tools.map((t) => ({
-    type: "function",
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: t.input_schema,
-    },
-  }));
+function buildTools(
+  tools: ToolDef[] | undefined,
+  serverTools: CreateMessageOptions["serverTools"],
+): Array<Record<string, unknown>> | undefined {
+  const out: Array<Record<string, unknown>> = [];
+  if (tools && tools.length > 0) {
+    for (const t of tools) {
+      out.push({
+        type: "function",
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.input_schema,
+        },
+      });
+    }
+  }
+  // OpenAI's hosted `web_search` tool — same surface as Anthropic's
+  // server tool, different name. The adapter doesn't dispatch on the
+  // tool's result; OpenAI surfaces the citations inline and our
+  // response normalizer pulls them off as `webSearchResults`.
+  if (serverTools && serverTools.length > 0) {
+    for (const st of serverTools) {
+      if (st.kind === "web_search") {
+        out.push({ type: "web_search" });
+      }
+    }
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -199,7 +218,7 @@ function buildRequestBody(opts: CreateMessageOptions, stream: boolean): Record<s
     max_completion_tokens: opts.maxTokens ?? spec.maxTokens ?? 4096,
   };
 
-  const tools = buildTools(opts.tools);
+  const tools = buildTools(opts.tools, opts.serverTools);
   if (tools) body.tools = tools;
 
   const effort = spec.reasoning?.effort;

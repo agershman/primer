@@ -23,6 +23,7 @@ import type {
   NormalizedUsage,
   StopReason,
   StreamEvent,
+  WebSearchResult,
 } from "./types.js";
 
 interface AnthropicWireUsage {
@@ -32,11 +33,24 @@ interface AnthropicWireUsage {
   cache_read_input_tokens?: number;
 }
 
+/**
+ * Citation block emitted by Anthropic's hosted `web_search_20250305`
+ * tool. We don't render these inline — the auditor consumes them as
+ * `WebSearchResult[]` evidence. Shape verified against the public
+ * tool-use docs as of 2026-05.
+ */
+interface AnthropicWebSearchResult {
+  type: "web_search_tool_result";
+  content?: Array<{ type: "web_search_result"; url: string; title?: string; encrypted_content?: string }>;
+}
+
 interface AnthropicMessageResponse {
   id: string;
   model: string;
   content: Array<
-    { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+    | { type: "text"; text: string }
+    | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+    | AnthropicWebSearchResult
   >;
   stop_reason: StopReason;
   usage: AnthropicWireUsage;
@@ -50,7 +64,27 @@ function buildRequestBody(opts: CreateMessageOptions, stream: boolean): Record<s
     messages: opts.messages.map((m) => ({ role: m.role, content: m.content })),
   };
   if (opts.system) body.system = opts.system;
-  if (opts.tools) body.tools = opts.tools;
+  // Merge regular tools + server tools into Anthropic's `tools` array.
+  // Server tools (`web_search_20250305`) use a `type` discriminator
+  // instead of `input_schema`; we don't dispatch on their results — the
+  // provider runs them and surfaces citations inline.
+  const tools: Array<Record<string, unknown>> = [];
+  if (opts.tools) {
+    for (const t of opts.tools) tools.push({ ...t });
+  }
+  if (opts.serverTools) {
+    for (const st of opts.serverTools) {
+      if (st.kind === "web_search") {
+        const entry: Record<string, unknown> = {
+          type: "web_search_20250305",
+          name: "web_search",
+        };
+        if (typeof st.maxUses === "number") entry.max_uses = st.maxUses;
+        tools.push(entry);
+      }
+    }
+  }
+  if (tools.length > 0) body.tools = tools;
   if (typeof spec.temperature === "number") body.temperature = spec.temperature;
   // Anthropic extended thinking config — only attach when the caller
   // asked for it so non-reasoning calls stay fast.
@@ -59,6 +93,19 @@ function buildRequestBody(opts: CreateMessageOptions, stream: boolean): Record<s
   }
   if (stream) body.stream = true;
   return body;
+}
+
+function extractWebSearchResults(blocks: AnthropicMessageResponse["content"]): WebSearchResult[] {
+  const out: WebSearchResult[] = [];
+  for (const b of blocks) {
+    if (b.type !== "web_search_tool_result" || !b.content) continue;
+    for (const r of b.content) {
+      if (r.type === "web_search_result" && r.url) {
+        out.push({ url: r.url, title: r.title ?? r.url, snippet: undefined });
+      }
+    }
+  }
+  return out;
 }
 
 function normalizeUsage(usage: AnthropicWireUsage): NormalizedUsage {
@@ -71,12 +118,18 @@ function normalizeUsage(usage: AnthropicWireUsage): NormalizedUsage {
 }
 
 function normalizeContent(blocks: AnthropicMessageResponse["content"]): ContentBlock[] {
-  return blocks.map((b) => {
+  const out: ContentBlock[] = [];
+  for (const b of blocks) {
     if (b.type === "tool_use") {
-      return { type: "tool_use", id: b.id, name: b.name, input: b.input };
+      out.push({ type: "tool_use", id: b.id, name: b.name, input: b.input });
+    } else if (b.type === "text") {
+      out.push({ type: "text", text: b.text });
     }
-    return { type: "text", text: b.text };
-  });
+    // `web_search_tool_result` blocks are surfaced separately via
+    // `webSearchResults` on the normalized response — they're not
+    // chat content the caller should iterate over.
+  }
+  return out;
 }
 
 export class AnthropicAdapter implements LLMClient {
@@ -115,12 +168,14 @@ export class AnthropicAdapter implements LLMClient {
         }
 
         const json = (await res.json()) as AnthropicMessageResponse;
+        const webSearchResults = extractWebSearchResults(json.content);
         return {
           id: json.id,
           model: json.model,
           content: normalizeContent(json.content),
           stopReason: json.stop_reason,
           usage: normalizeUsage(json.usage),
+          ...(webSearchResults.length > 0 ? { webSearchResults } : {}),
         };
       } catch (err) {
         const error = err as Error;
