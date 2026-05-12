@@ -155,13 +155,24 @@ briefingReadRoutes.get("/briefing/status", async (c) => {
 
   const metadata = briefing?.metadata ? JSON.parse(briefing.metadata) : {};
 
-  // Compute the average duration of recent successful briefings (last 10) for an adaptive ETA
+  // Compute the average duration of recent runs (last 10) for an
+  // adaptive ETA. Sourced from `briefing_timings` rather than
+  // (updated_at - created_at) on the briefings row: an additive
+  // Generate-now run reuses the row that the daily cron created
+  // hours (or days) earlier, so the row-level delta produces wildly
+  // inflated estimates (we saw 348 minutes in the wild). Per-step
+  // timings are stamped by the actual run, so the MAX(finished_at) -
+  // MIN(started_at) window reflects the wall-clock time of THIS run.
   const durationsRow = await c.env.DB.prepare(
-    `SELECT AVG((julianday(updated_at) - julianday(created_at)) * 86400) as avg_seconds
+    `SELECT AVG(elapsed_seconds) AS avg_seconds
      FROM (
-       SELECT created_at, updated_at FROM briefings
-       WHERE user_id = ? AND status IN ('generated', 'partial') AND updated_at > created_at
-       ORDER BY created_at DESC LIMIT 10
+       SELECT (julianday(MAX(finished_at)) - julianday(MIN(started_at))) * 86400 AS elapsed_seconds
+       FROM briefing_timings
+       WHERE user_id = ?
+       GROUP BY briefing_id
+       HAVING elapsed_seconds > 0
+       ORDER BY MAX(finished_at) DESC
+       LIMIT 10
      )`,
   )
     .bind(user.userId)

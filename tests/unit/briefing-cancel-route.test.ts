@@ -59,7 +59,11 @@ class FakeD1 {
               return (row ? { id: row.id } : null) as T | null;
             }
 
-            if (normalized.includes("AVG((julianday(updated_at) - julianday(created_at))")) {
+            // ETA query: averages elapsed time per briefing from the
+            // `briefing_timings` table. The status route only uses the
+            // result for cosmetic ETA copy, so returning null here is
+            // safe — the UI falls back to "this usually takes 1–2 min".
+            if (normalized.includes("FROM briefing_timings") && normalized.includes("AVG(elapsed_seconds)")) {
               return { avg_seconds: null } as T;
             }
 

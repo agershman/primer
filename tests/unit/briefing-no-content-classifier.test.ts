@@ -29,12 +29,32 @@ describe("classifyNoContentReason", () => {
     expect(classifyNoContentReason({ totalPieces: 0, selectedCount: 3, errorCount: 1 })).toBe("all_pieces_failed");
   });
 
-  it("falls back to 'no_candidates' when selected > 0 but neither errors nor pieces — defensive bucket", () => {
-    // Shouldn't happen in practice (the generator always either
-    // persists a piece or pushes an error per selected candidate),
-    // but if it ever did we want the calm copy rather than a
-    // misleading "everything failed". The test pins that choice so
-    // a future refactor doesn't silently flip it.
+  it("returns 'all_drafts_redundant' when every draft was filtered as redundant with recent teaching", () => {
+    // The pipeline drafted pieces but the continuation classifier
+    // matched each one against a recent predecessor — common on a
+    // user-triggered Generate-now run where the day's signal hasn't
+    // moved enough to warrant fresh teaching. We want a distinct
+    // toast copy here ("drafted but overlapped") rather than the
+    // misleading "nothing surfaced" the no_candidates bucket implies.
+    expect(
+      classifyNoContentReason({ totalPieces: 0, selectedCount: 4, errorCount: 0, redundantCount: 4 }),
+    ).toBe("all_drafts_redundant");
+    // Mixed: some drafts redundant, some errored. Errors still win
+    // because the user should know something broke.
+    expect(
+      classifyNoContentReason({ totalPieces: 0, selectedCount: 4, errorCount: 1, redundantCount: 3 }),
+    ).toBe("all_pieces_failed");
+  });
+
+  it("falls back to 'no_candidates' when selected > 0 but neither errors, pieces, nor redundant drafts", () => {
+    // Shouldn't happen in practice (every selected candidate produces
+    // one of: a persisted piece, an error, or a redundant predecessor
+    // record), but if it ever did we want the calm copy rather than a
+    // misleading "everything failed". The test pins that choice so a
+    // future refactor doesn't silently flip it.
     expect(classifyNoContentReason({ totalPieces: 0, selectedCount: 2, errorCount: 0 })).toBe("no_candidates");
+    expect(
+      classifyNoContentReason({ totalPieces: 0, selectedCount: 2, errorCount: 0, redundantCount: 0 }),
+    ).toBe("no_candidates");
   });
 });

@@ -242,7 +242,9 @@ function EtaMessage({ startedAt, averageSeconds }: { startedAt: string | null; a
     if (startedAt && elapsed > 0) {
       const remaining = Math.max(0, Math.round(averageSeconds - elapsed));
       if (remaining > 0) {
-        return <>Based on your recent briefings, about {formatDuration(remaining)} remaining.</>;
+        // `formatDuration` already prefixes with "about" — re-adding it
+        // here produced "about about 5 minutes remaining" in the wild.
+        return <>Based on your recent briefings, {formatDuration(remaining)} remaining.</>;
       }
       return <>Taking a bit longer than usual — almost there.</>;
     }

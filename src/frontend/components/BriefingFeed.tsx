@@ -567,6 +567,12 @@ function copyForNoNewContent(reason: string): string {
   switch (reason) {
     case "no_candidates":
       return "Nothing new surfaced — your sources didn't have anything fresh to teach yet.";
+    case "all_drafts_redundant":
+      // The pipeline did real work — pieces were drafted but the
+      // continuation classifier matched every one against a recent
+      // teaching piece, so nothing got persisted. Say so directly
+      // instead of the misleading "nothing surfaced" copy.
+      return "We drafted some pieces, but they overlapped with recent teaching. Nothing new to add right now.";
     case "monthly_budget_exceeded":
       return "Monthly LLM budget reached. Generation will resume next cycle.";
     case "cancelled":
