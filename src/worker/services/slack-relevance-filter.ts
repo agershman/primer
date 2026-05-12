@@ -13,10 +13,10 @@
  *
  * The fix is a small batched LLM call that scores each Slack thread
  * 0.0–1.0 against the user's About + Focus + global filterPrompt, and
- * drops anything below the threshold. Bookmarked threads (🔖 prefix on
- * the title — see `slack.ts` `groupAndFilterSlackMessages`) bypass the
- * filter entirely because the user has explicitly opted them in via
- * `:bookmark:` reactions.
+ * drops anything below the threshold. Bookmarked threads (carrying
+ * `item.bookmarked === true` — set by `slack.ts` for any thread with
+ * a `:bookmark:` reaction) bypass the filter entirely because the
+ * user has explicitly opted them in.
  *
  * Mirrors the prompt + bucket shape of `adjacent-scanner.ts` so future
  * generalization to other source types (Linear, GitHub, etc.) can fold
@@ -90,11 +90,9 @@ function defaultSpec(): ModelSpec {
     : { provider: "anthropic", model: DEFAULT_MODELS.adjacentScoring };
 }
 
-const BOOKMARK_PREFIX = "🔖";
-
 /**
  * Filter Slack threads in `items` against the user's About + Focus +
- * filter prompt. Bookmarked threads (titles starting with `🔖`)
+ * filter prompt. Bookmarked threads (`item.bookmarked === true`)
  * bypass scoring. Non-Slack items pass through unchanged.
  *
  * Returns the filtered items plus a per-dropped-thread reason list.
@@ -131,8 +129,8 @@ export async function filterSlackByRelevance(
   // Treating that as overriding our LLM relevance pass matches how
   // the noise / brevity filters are bypassed for bookmarked content
   // in `slack.ts`.
-  const bookmarked = slackItems.filter((i) => titleStartsWithBookmark(i.title));
-  const candidates = slackItems.filter((i) => !titleStartsWithBookmark(i.title));
+  const bookmarked = slackItems.filter((i) => i.bookmarked);
+  const candidates = slackItems.filter((i) => !i.bookmarked);
 
   if (candidates.length === 0) {
     return {
@@ -246,8 +244,4 @@ Include EVERY thread, even ones below threshold (we drop client-side).`;
       failedOpen: true,
     };
   }
-}
-
-function titleStartsWithBookmark(title: string): boolean {
-  return title.startsWith(BOOKMARK_PREFIX);
 }

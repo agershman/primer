@@ -5,8 +5,8 @@
  *
  * Coverage:
  *   1. Empty / no-Slack input — early return, no LLM call.
- *   2. Bookmarked threads (🔖 prefix) bypass scoring entirely — even
- *      a near-zero score keeps them.
+ *   2. Bookmarked threads (`item.bookmarked === true`) bypass scoring
+ *      entirely — even a near-zero score keeps them.
  *   3. Threshold gate — items at or above threshold pass; below drop;
  *      uses the supplied threshold (defaults to 0.4).
  *   4. Unscored items default to "kept" (per-item fail-open) so a
@@ -60,6 +60,7 @@ function slackThread(
   id: string,
   title: string,
   description = "",
+  bookmarked = false,
 ): WorkContextItem {
   return {
     type: "slack_thread",
@@ -67,6 +68,7 @@ function slackThread(
     title,
     url: `https://slack.example.com/archives/X/p${id}`,
     description,
+    ...(bookmarked ? { bookmarked: true } : {}),
   };
 }
 
@@ -120,8 +122,8 @@ describe("filterSlackByRelevance — empty / passthrough cases", () => {
     const generateJson = vi.fn();
     const llm = { generateJson } as unknown as LLMClient;
     const items = [
-      slackThread("t1", "🔖 PR review on the new scheduler"),
-      slackThread("t2", "🔖 Postmortem follow-up"),
+      slackThread("t1", "🔖 PR review on the new scheduler", "", true),
+      slackThread("t2", "🔖 Postmortem follow-up", "", true),
     ];
     const result = await filterSlackByRelevance(llm, fakeDB(), "user-1", items);
     expect(result.totalSlackCount).toBe(2);
@@ -160,18 +162,36 @@ describe("filterSlackByRelevance — threshold + bookmark bypass", () => {
   });
 
   it("bookmarked threads bypass scoring even when scored low for the unbookmarked siblings", async () => {
-    // Two threads — one bookmarked (🔖), one not. The model only
-    // sees the unbookmarked one; the bookmarked one is kept regardless.
+    // Two threads — one bookmarked (`bookmarked: true`), one not. The
+    // model only sees the unbookmarked one; the bookmarked one is kept
+    // regardless. The 🔖 title prefix is purely cosmetic now —
+    // bypass keys off the `bookmarked` field.
     const llm = fakeLLM({
       scores: [{ index: 0, score: 0.0, reason: "noise" }],
     });
     const items = [
-      slackThread("t1", "🔖 Bookmarked thread the team flagged"),
+      slackThread("t1", "🔖 Bookmarked thread the team flagged", "", true),
       slackThread("t2", "msft makes good dev tools. that is it"),
     ];
     const result = await filterSlackByRelevance(llm, fakeDB(), "user-1", items);
     expect(result.kept.map((i) => i.id)).toEqual(["t1"]);
     expect(result.dropped.map((d) => d.id)).toEqual(["t2"]);
+  });
+
+  it("does NOT bypass scoring on the 🔖 title prefix alone — bookmark gating reads `item.bookmarked`", async () => {
+    // Regression guard: an earlier version keyed the bypass off the
+    // title prefix, which conflated "user-bookmarked" with "team
+    // teammate bookmarked, surfaced via channel scan". The field is
+    // the source of truth now; the prefix is for human display.
+    const llm = fakeLLM({
+      scores: [{ index: 0, score: 0.0, reason: "noise" }],
+    });
+    const items = [
+      slackThread("t1", "🔖 Title carries the glyph but no field"),
+    ];
+    const result = await filterSlackByRelevance(llm, fakeDB(), "user-1", items);
+    expect(result.kept.map((i) => i.id)).toEqual([]);
+    expect(result.dropped.map((d) => d.id)).toEqual(["t1"]);
   });
 
   it("uses 0.4 as the default threshold when none is supplied", async () => {

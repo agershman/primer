@@ -626,12 +626,85 @@ export async function generateDailyBriefing(
 
     const candidates: TeachingTarget[] = [];
 
-    // P1: Low-depth concepts from active work. On an additive refresh,
+    // P1 (bookmark): every bookmarked work item gets a candidate.
+    // Bookmarks are an explicit user opt-in ("teach me from this")
+    // and must reliably produce a piece — they bypass both the depth
+    // filter (priority 2 requires `depth_score < 3`) and the
+    // NO_REPEAT_WITHIN_DAYS recent-concept filter. The only dedupe
+    // applied here is the additive-refresh `existingPieceConceptIds`
+    // guard, which prevents a same-briefing duplicate insert.
+    //
+    // Concept selection per bookmark: pick the lowest-depth concept
+    // whose canonical name appears in the bookmarked item's text. If
+    // no extracted concept matches, fall back to a concept-less
+    // candidate keyed off the bookmark's title — `generateTeachingPiece`
+    // handles missing conceptIds gracefully (same path adjacent items
+    // without a matched concept already use).
+    const bookmarkedItems = workContext.filter((i) => i.bookmarked);
+    const bookmarkConceptIds = new Set<string>();
+    for (const item of bookmarkedItems) {
+      const haystack = `${item.title} ${item.description ?? ""}`.toLowerCase();
+      const matched = activeConcepts
+        .filter((c) => haystack.includes(c.canonical_name.toLowerCase()))
+        .filter((c) => !existingPieceConceptIds.has(c.id))
+        .sort((a, b) => (a.depth_score ?? 0) - (b.depth_score ?? 0));
+
+      const sourceCtx: SourceDescriptor = {
+        type: item.type,
+        id: item.id,
+        title: item.title,
+        url: item.url,
+        dueAt: item.dueAt ?? null,
+        dueReason: item.dueReason ?? null,
+      };
+
+      if (matched.length > 0) {
+        const concept = matched[0];
+        if (bookmarkConceptIds.has(concept.id)) continue;
+        bookmarkConceptIds.add(concept.id);
+        candidates.push({
+          conceptName: concept.canonical_name,
+          conceptId: concept.id,
+          depthScore: concept.depth_score ?? 0,
+          sourceType: "current-work",
+          sourceDescription: item.description,
+          selectionReasoning: `Bookmarked source: "${item.title.slice(0, 80)}"`,
+          priority: 1,
+          sourceContext: [sourceCtx],
+        });
+      } else {
+        // No extracted concept matched the bookmarked item — fall back
+        // to a synthesized target so the bookmark still produces a
+        // piece. `conceptId: ""` mirrors how adjacent items without a
+        // matched concept are handled; downstream selection treats an
+        // empty id as "no concept-graph dedupe key" without crashing.
+        const fallbackName = item.title.replace(/^🔖\s*/, "").slice(0, 80) || "bookmarked-message";
+        candidates.push({
+          conceptName: fallbackName,
+          conceptId: "",
+          depthScore: 0,
+          sourceType: "current-work",
+          sourceDescription: item.description,
+          selectionReasoning: `Bookmarked source (no matching concept): "${item.title.slice(0, 80)}"`,
+          priority: 1,
+          sourceContext: [sourceCtx],
+        });
+      }
+    }
+
+    // P2: Low-depth concepts from active work. On an additive refresh,
     // skip concepts that already have a piece on this briefing — the
     // whole point of preserving existing pieces is that we don't
-    // re-teach what's already there.
+    // re-teach what's already there. Also skip concepts already
+    // claimed by the P1 bookmark tier so we don't double-book.
     const activeWorkConcepts = activeConcepts
-      .filter((c) => !recentSet.has(c.id) && (c.depth_score ?? 0) < 3 && !existingPieceConceptIds.has(c.id))
+      .filter(
+        (c) =>
+          !recentSet.has(c.id) &&
+          (c.depth_score ?? 0) < 3 &&
+          !existingPieceConceptIds.has(c.id) &&
+          !bookmarkConceptIds.has(c.id),
+      )
       .sort((a, b) => (a.depth_score ?? 0) - (b.depth_score ?? 0));
 
     for (const concept of activeWorkConcepts) {
