@@ -98,6 +98,15 @@ describe("Briefing-pipeline gate — selectEnabledSingletons", () => {
     const { resolve } = await import("node:path");
     const REPO_ROOT = resolve(__dirname, "..", "..");
     const src = await readFile(resolve(REPO_ROOT, "src/worker/services/briefing-generator.ts"), "utf-8");
-    expect(src).toMatch(/selectEnabledSingletons\(\s*sourceRegistry\.getSingletons\(env\),\s*userSettings\?\.enabledSourceIds/);
+    // Accept either inline form or intermediate-local form (the
+    // pipeline-trace work introduced `allSingletons` so disabled
+    // providers can be surfaced in the trace panel without calling
+    // `getSingletons` twice). The behavioural assertion above
+    // (mocked source providers) pins the runtime contract; this
+    // grep just guarantees the gate name + the singleton source
+    // both appear in the orchestrator.
+    expect(src).toMatch(/selectEnabledSingletons\(/);
+    expect(src).toMatch(/sourceRegistry\.getSingletons\(env\)/);
+    expect(src).toMatch(/userSettings\?\.enabledSourceIds/);
   });
 });

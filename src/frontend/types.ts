@@ -226,15 +226,6 @@ export interface WeeklyStats {
   newConcepts: number;
 }
 
-export interface NearMissItem {
-  title: string;
-  source_type: string;
-  source_label: string;
-  relevance_score: number;
-  exclusion_reason: string;
-  url: string | null;
-}
-
 export interface QuizData {
   id: string;
   concept: string;
