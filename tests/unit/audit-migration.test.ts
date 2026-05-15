@@ -45,8 +45,15 @@ describe("migration 0007 declares the audit tables + show_audit_marks column", (
     expect(src).toMatch(/CREATE INDEX idx_audit_claims_audit/);
   });
 
-  it("adds show_audit_marks to user_settings (default 1)", async () => {
+  it("adds show_audit_marks to user_settings (default 0)", async () => {
+    // Default OFF — the indicator pill is the primary surface; inline
+    // wavy underlines are opt-in. Round-1 shipped DEFAULT 1 and the
+    // round-2 polish flipped every app-layer default to false but
+    // missed this column, so existing rows kept showing marks (the
+    // app-layer `?? false` fallbacks never fired because the column
+    // was never null). Pin the column default here so a future
+    // refactor that flips it back to 1 fails CI.
     const src = await read("migrations/0007_content_audits.sql");
-    expect(src).toMatch(/ALTER TABLE user_settings\s+ADD COLUMN show_audit_marks INTEGER NOT NULL DEFAULT 1/);
+    expect(src).toMatch(/ALTER TABLE user_settings\s+ADD COLUMN show_audit_marks INTEGER NOT NULL DEFAULT 0/);
   });
 });

@@ -1,0 +1,28 @@
+-- 0008_audit_marks_default_off.sql
+-- Backfill for the show_audit_marks default flip.
+--
+-- Why this exists: migration 0007 shipped with `show_audit_marks
+-- INTEGER NOT NULL DEFAULT 1`, which sets every existing user_settings
+-- row to `1` at ALTER time. The round-2 audit polish (commit cb3c986)
+-- flipped the in-app fallbacks to `false` across user-context.ts, the
+-- settings route, useSettings.DEFAULT_SETTINGS, and TeachingPiece's
+-- initial marksVisible state — but those fallbacks only fire when the
+-- column is null, and the column is never null (0007 made it NOT NULL
+-- with a non-null default). So users kept seeing inline wavy
+-- underlines by default despite the app-layer "fix".
+--
+-- This migration flips the persisted value to `0` for every existing
+-- row. The migration 0007 default was also retroactively changed to
+-- `DEFAULT 0` so fresh deploys / fresh test DBs land on the right
+-- value without needing this backfill.
+--
+-- Idempotency: the WHERE clause makes this a no-op once applied. Users
+-- who explicitly turned marks back on via the Settings → Intelligence
+-- toggle BEFORE this migration ran will get reset to off here, which
+-- is acceptable — the toggle is one click away in the AuditIndicator
+-- dropdown, and the alternative (preserve per-user opt-in) would
+-- require schema we don't have (a "user explicitly set this" bit).
+-- In practice almost nobody discovered the global setting because the
+-- inline marks were already on, so the regret surface is tiny.
+
+UPDATE user_settings SET show_audit_marks = 0 WHERE show_audit_marks = 1;

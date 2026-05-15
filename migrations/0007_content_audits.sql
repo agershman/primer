@@ -96,8 +96,10 @@ CREATE INDEX idx_audits_user_created ON audits(user_id, created_at DESC);
 CREATE INDEX idx_audit_claims_audit ON audit_claims(audit_id);
 
 -- Per-user toggle for the inline wavy-underline marks on flagged
--- spans. Default ON — the audit is the headline trust feature; users
--- who want to read distraction-free flip it off in
--- Settings → Intelligence. The pill summary stays visible either way.
+-- spans. Default OFF — the indicator pill already surfaces "Audited ·
+-- N dropped" prominently, and inline underlines on top of that read
+-- as noise for everyday reading. Users opt in per piece via the
+-- indicator dropdown's "Show audit marks" toggle (or globally in
+-- Settings → Intelligence). The pill summary stays visible either way.
 ALTER TABLE user_settings
-  ADD COLUMN show_audit_marks INTEGER NOT NULL DEFAULT 1;
+  ADD COLUMN show_audit_marks INTEGER NOT NULL DEFAULT 0;
