@@ -113,7 +113,10 @@ export default {
       });
     }
 
-    if (cron === "0 3 * * 0") {
+    // Cloudflare passes the literal cron string from wrangler.toml,
+    // which uses "SUN" (not "0"). Earlier the handler checked
+    // "0 3 * * 0" so the Sunday maintenance branch never matched.
+    if (cron === "0 3 * * SUN") {
       console.log("[cron] Running Sunday maintenance job");
       const allUsers = await env.DB.prepare("SELECT id FROM users").all<{ id: string }>();
 
