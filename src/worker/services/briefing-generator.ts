@@ -59,7 +59,7 @@ import {
 import { llmClient } from "../integrations/llm/dispatcher.js";
 import type { ModelSpec } from "../integrations/llm/types.js";
 import { type SourceFetchContext, sourceRegistry, type WorkContextItem } from "../sources/index.js";
-import type { ContentBlock, Env, UserSettings } from "../types.js";
+import { type Env, singletonSourceKey, type UserSettings } from "../types.js";
 import { userToday } from "../util/time.js";
 import { scanAdjacentSources } from "./adjacent-scanner.js";
 import {
@@ -237,10 +237,9 @@ export async function generateDailyBriefing(
     // thrown away. The gate logic lives in `selectEnabledSingletons`
     // (see briefing-generator/shared.ts) so it's pinned by a unit
     // test that doesn't need the rest of the pipeline standing up.
-    const singletonProviders = selectEnabledSingletons(
-      sourceRegistry.getSingletons(env),
-      userSettings?.enabledSourceIds,
-    );
+    const allSingletons = sourceRegistry.getSingletons(env);
+    const singletonProviders = selectEnabledSingletons(allSingletons, userSettings?.enabledSourceIds);
+    const enabledIdSet = new Set(singletonProviders.map((p) => p.id));
     const fetchCtx: SourceFetchContext = {
       env,
       db,
@@ -252,17 +251,49 @@ export async function generateDailyBriefing(
     };
 
     const sourceResults = await Promise.all(
-      singletonProviders.map((provider) =>
-        safeStep(provider.id, () => provider.fetch(fetchCtx), { items: [], details: [] }),
-      ),
+      singletonProviders.map(async (provider) => {
+        const step = await safeStep(provider.id, () => provider.fetch(fetchCtx), { items: [], details: [] });
+        return { provider, step };
+      }),
     );
 
-    for (const result of sourceResults) {
-      if (result.error) errors.push(result.error);
-      for (const item of result.data.items as WorkContextItem[]) {
+    // Per-provider rollups for the pipeline trace. We capture the FULL
+    // singleton registry (not just enabled) so the trace can show
+    // "this source is configured but the user opted out" alongside
+    // "this source ran but had nothing today" and "this source
+    // errored". Sample items are titles/urls only (no descriptions)
+    // so the JSON stays compact.
+    const providerStats: Array<{
+      id: string;
+      name: string;
+      enabled: boolean;
+      fetched: boolean;
+      itemCount: number;
+      errored: boolean;
+      sampleItems: Array<{ title: string; url?: string }>;
+    }> = [];
+    const resultsByProvider = new Map(sourceResults.map((r) => [r.provider.id, r]));
+    for (const provider of allSingletons) {
+      const enabled = enabledIdSet.has(provider.id);
+      const result = resultsByProvider.get(provider.id);
+      const items = (result?.step.data.items ?? []) as WorkContextItem[];
+      providerStats.push({
+        id: provider.id,
+        name: provider.name,
+        enabled,
+        fetched: enabled && !!result,
+        itemCount: items.length,
+        errored: !!result?.step.error,
+        sampleItems: items.slice(0, 5).map((i) => ({ title: i.title, url: i.url })),
+      });
+    }
+
+    for (const { step } of sourceResults) {
+      if (step.error) errors.push(step.error);
+      for (const item of step.data.items as WorkContextItem[]) {
         workContext.push(item);
       }
-      contextDetails.push(...result.data.details);
+      contextDetails.push(...step.data.details);
     }
 
     await updateProgress(db, briefingId, "work_context", `Found ${workContext.length} work items`, contextDetails);
@@ -272,6 +303,7 @@ export async function generateDailyBriefing(
       stepKey: "work_context",
       startedAt: stepStart,
       itemsProcessed: workContext.length,
+      metadata: { providers: providerStats },
     });
 
     // Step 1.5: Slack relevance filter — drop banter / off-topic chatter
@@ -342,6 +374,17 @@ export async function generateDailyBriefing(
           keptSlackCount: filterResult.keptSlackCount,
           droppedCount,
           failedOpen: filterResult.failedOpen,
+          // Capped at 20 — keeps the metadata blob small while still
+          // covering typical days. `sourceType` keeps the shape
+          // generic so future relevance gates can reuse this metadata
+          // contract under their own step key.
+          droppedItems: filterResult.dropped.slice(0, 20).map((d) => ({
+            id: d.id,
+            sourceType: "slack_thread",
+            title: d.title,
+            score: d.score,
+            reason: d.reason,
+          })),
         },
       });
     }
@@ -398,6 +441,37 @@ export async function generateDailyBriefing(
     );
     if (extractionStep.error) errors.push(extractionStep.error);
 
+    // Reconstruct the per-filter bucket layout the extractor used so
+    // the trace can show "items from <source> were extracted under
+    // the <override / global> filter". The extractor uses the same
+    // logic at concept-extractor.ts:283-296; we don't have the
+    // post-extraction concept count per bucket (extractor returns a
+    // single rollup) but the routing is the most useful signal.
+    const conceptBucketMap = new Map<string, { filterLabel: string; sourceTypes: Set<string>; itemCount: number }>();
+    {
+      const overrides = userSettings?.sourceFilterOverrides ?? {};
+      const globalFilter = userSettings?.filterPrompt ?? null;
+      for (const item of workContext) {
+        const sourceKey = singletonSourceKey(item.type);
+        const override = sourceKey ? overrides[sourceKey] : undefined;
+        const filterText = override ?? globalFilter ?? null;
+        const filterLabel = override ? `override:${sourceKey}` : globalFilter ? "global" : "none";
+        const key = `${filterLabel}::${filterText ?? ""}`;
+        let bucket = conceptBucketMap.get(key);
+        if (!bucket) {
+          bucket = { filterLabel, sourceTypes: new Set(), itemCount: 0 };
+          conceptBucketMap.set(key, bucket);
+        }
+        bucket.sourceTypes.add(item.type);
+        bucket.itemCount++;
+      }
+    }
+    const conceptBuckets = [...conceptBucketMap.values()].map((b) => ({
+      filterLabel: b.filterLabel,
+      sourceTypes: [...b.sourceTypes],
+      itemCount: b.itemCount,
+    }));
+
     await recordTiming(db, {
       briefingId,
       userId,
@@ -411,6 +485,7 @@ export async function generateDailyBriefing(
         existingConceptIds: extractionStep.data.existingConceptIds.length,
         tokensInput: extractionStep.data.usage.inputTokens,
         tokensOutput: extractionStep.data.usage.outputTokens,
+        buckets: conceptBuckets,
       },
     });
 
@@ -853,16 +928,62 @@ export async function generateDailyBriefing(
     });
     const sorted = indexed.map((x) => x.c);
 
+    // Track why each candidate was kept or dropped, in pre-sort
+    // order, for the pipeline trace. `selected: true` means it made
+    // the final cut; otherwise `droppedReason` carries the first cap
+    // it tripped. Order within the array mirrors the sorted order so
+    // the trace renders highest-priority candidates first.
+    type CandidateOutcome = {
+      conceptName: string;
+      conceptId: string;
+      priority: number;
+      depthScore: number;
+      sourceType: string;
+      focusScore: number;
+      selected: boolean;
+      droppedReason: string | null;
+    };
+    const candidateOutcomes: CandidateOutcome[] = [];
+    const outcomeByCandidate = new Map<TeachingTarget, CandidateOutcome>();
+    for (let i = 0; i < indexed.length; i++) {
+      const c = indexed[i].c;
+      const outcome: CandidateOutcome = {
+        conceptName: c.conceptName,
+        conceptId: c.conceptId,
+        priority: c.priority,
+        depthScore: c.depthScore,
+        sourceType: c.sourceType,
+        focusScore: focusScoreFor(c, indexed[i].i),
+        selected: false,
+        droppedReason: null,
+      };
+      candidateOutcomes.push(outcome);
+      outcomeByCandidate.set(c, outcome);
+    }
+
     for (const candidate of sorted) {
-      if (selected.length >= maxNewPieces) break;
-      if (candidate.conceptId && usedConceptIds.has(candidate.conceptId)) continue;
+      const outcome = outcomeByCandidate.get(candidate);
+      if (selected.length >= maxNewPieces) {
+        if (outcome) outcome.droppedReason ??= "cap_max_pieces";
+        continue;
+      }
+      if (candidate.conceptId && usedConceptIds.has(candidate.conceptId)) {
+        if (outcome) outcome.droppedReason ??= "duplicate_concept";
+        continue;
+      }
 
       if (candidate.sourceType === "adjacent") {
-        if (adjacentCount >= BRIEFING_RULES.MAX_ADJACENT_PIECES) continue;
+        if (adjacentCount >= BRIEFING_RULES.MAX_ADJACENT_PIECES) {
+          if (outcome) outcome.droppedReason ??= "cap_adjacent";
+          continue;
+        }
         adjacentCount++;
       }
       if (candidate.sourceType === "decay-recalibrate") {
-        if (decayCount >= BRIEFING_RULES.MAX_DECAY_PIECES) continue;
+        if (decayCount >= BRIEFING_RULES.MAX_DECAY_PIECES) {
+          if (outcome) outcome.droppedReason ??= "cap_decay";
+          continue;
+        }
         decayCount++;
       }
       if (candidate.sourceType === "current-work") {
@@ -870,6 +991,7 @@ export async function generateDailyBriefing(
       }
 
       selected.push(candidate);
+      if (outcome) outcome.selected = true;
       if (candidate.conceptId) usedConceptIds.add(candidate.conceptId);
     }
 
@@ -905,6 +1027,11 @@ export async function generateDailyBriefing(
         const next = sorted.find((c) => !selected.includes(c) && (!c.conceptId || !usedConceptIds.has(c.conceptId)));
         if (!next) break;
         selected.push(next);
+        const nextOutcome = outcomeByCandidate.get(next);
+        if (nextOutcome) {
+          nextOutcome.selected = true;
+          nextOutcome.droppedReason = null;
+        }
         if (next.conceptId) usedConceptIds.add(next.conceptId);
       }
     }
@@ -916,7 +1043,10 @@ export async function generateDailyBriefing(
       stepKey: "selecting",
       startedAt: stepStart,
       itemsProcessed: selected.length,
-      metadata: { candidates: candidates.length },
+      metadata: {
+        candidates: candidates.length,
+        outcomes: candidateOutcomes,
+      },
     });
 
     stepStart = Date.now();
@@ -996,24 +1126,32 @@ export async function generateDailyBriefing(
       );
 
       for (const { target, pieceStep, pieceStartedAt } of batchResults) {
-        await recordTiming(db, {
-          briefingId,
-          userId,
-          stepKey: "teaching_piece",
-          startedAt: pieceStartedAt,
-          itemsProcessed: pieceStep.error || !pieceStep.data ? 0 : 1,
-          modelUsed: teachingPieceSpec.model,
-          metadata: {
-            conceptName: target.conceptName,
-            pieceType: pieceStep.data?.pieceType ?? null,
-            targetDepth: target.depthScore,
-            ok: !pieceStep.error && !!pieceStep.data,
-          },
-        });
+        // Pin the writer's wall-clock finish before the classifier
+        // runs so the per-piece duration in the trace stays scoped
+        // to the writer alone (audit + classifier get their own
+        // accounting). The recordTiming call moves below so we can
+        // fold in the classifier verdict; passing `finishedAt`
+        // explicitly preserves the original duration.
+        const writerFinishedAt = Date.now();
 
         if (pieceStep.error) {
           errors.push(pieceStep.error);
           pieceDetails.push(`✗ ${target.conceptName} — failed`);
+          await recordTiming(db, {
+            briefingId,
+            userId,
+            stepKey: "teaching_piece",
+            startedAt: pieceStartedAt,
+            finishedAt: writerFinishedAt,
+            itemsProcessed: 0,
+            modelUsed: teachingPieceSpec.model,
+            metadata: {
+              conceptName: target.conceptName,
+              pieceType: null,
+              targetDepth: target.depthScore,
+              ok: false,
+            },
+          });
         } else if (pieceStep.data) {
           let piece = pieceStep.data;
           const conceptIds = target.conceptId ? [target.conceptId] : [];
@@ -1065,6 +1203,34 @@ export async function generateDailyBriefing(
             // piece because the continuation gate had a bad day.
             console.warn("[continuation-classifier] step failed; treating as NOVEL:", err);
           }
+
+          // Record per-piece timing now that we know the classifier
+          // verdict, but pin `finishedAt` to the writer's wall clock
+          // so the duration in the trace is just the writer call
+          // (audit + the optional continuation rewrite get their own
+          // rows / fall under generating_pieces accounting).
+          await recordTiming(db, {
+            briefingId,
+            userId,
+            stepKey: "teaching_piece",
+            startedAt: pieceStartedAt,
+            finishedAt: writerFinishedAt,
+            itemsProcessed: 1,
+            modelUsed: teachingPieceSpec.model,
+            metadata: {
+              conceptName: target.conceptName,
+              pieceType: piece.pieceType,
+              targetDepth: target.depthScore,
+              ok: true,
+              continuation: classification
+                ? {
+                    classification: classification.classification,
+                    predecessor_title: classification.predecessor?.title ?? null,
+                    reason: classification.reason ?? null,
+                  }
+                : null,
+            },
+          });
 
           if (classification?.classification === "REDUNDANT" && classification.predecessor) {
             const pred = classification.predecessor;

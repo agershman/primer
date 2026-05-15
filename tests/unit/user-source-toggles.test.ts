@@ -87,7 +87,13 @@ describe("Briefing pipeline gates on enabled source IDs", () => {
     // pinnable by a unit test without standing up the rest of
     // the pipeline. See tests/unit/briefing-pipeline-gate.test.ts
     // for the behavioural assertions.
-    expect(src).toMatch(/selectEnabledSingletons\(\s*sourceRegistry\.getSingletons\(env\)/);
+    // Accepts either the inline form `selectEnabledSingletons(sourceRegistry.getSingletons(env), ...)`
+    // or an intermediate local that binds the registry result first
+    // (the trace work captures `allSingletons` so it can show
+    // disabled providers in the pipeline panel without calling
+    // `getSingletons` twice).
+    expect(src).toMatch(/selectEnabledSingletons\(/);
+    expect(src).toMatch(/sourceRegistry\.getSingletons\(env\)/);
   });
 
   it("adjacent-scanner accepts an enabledSourceIds option and filters by instance kind", async () => {

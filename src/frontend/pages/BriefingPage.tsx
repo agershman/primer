@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { BriefingFeed } from "../components/BriefingFeed";
 import { CalibrationQuiz } from "../components/CalibrationQuiz";
 import { FeedbackToast } from "../components/FeedbackToast";
-import { NearMisses } from "../components/NearMisses";
+import { PipelineTrace } from "../components/PipelineTrace";
 import { RedundantDraftsChip } from "../components/RedundantDraftsChip";
 import { TeachingPiece } from "../components/TeachingPiece";
 import { WeeklyStats } from "../components/WeeklyStats";
@@ -270,7 +270,7 @@ function DatedBriefingView({ date, deepDiveId }: DatedBriefingViewProps) {
         </div>
       )}
 
-      {briefing?.id && <NearMisses briefingId={briefing.id} />}
+      {briefing?.id && <PipelineTrace briefingId={briefing.id} />}
 
       {toastDeltas.length > 0 && <FeedbackToast deltas={toastDeltas} onDismiss={() => setToastDeltas([])} />}
     </div>
