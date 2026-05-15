@@ -121,7 +121,9 @@ export function SlackPanel() {
                 Any message reacted with <BookmarkReactionTag /> is always in scope — yours in any public channel
                 (resolved via your Primer email against the Slack workspace), and anyone's reactions in the channels
                 above. Bookmarked messages bypass the noise / brevity filters and sort to the top of the work-context
-                bar.
+                bar. When a thread is in scope AND individual replies within it also carry the reaction, those replies
+                are surfaced to the writer as an emphasized excerpt so the resulting teaching piece anchors on what you
+                actually flagged.
               </>
             }
           >

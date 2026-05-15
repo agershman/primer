@@ -643,7 +643,31 @@ export async function generateDailyBriefing(
     const bookmarkedItems = workContext.filter((i) => i.bookmarked);
     const bookmarkConceptIds = new Set<string>();
     for (const item of bookmarkedItems) {
-      const haystack = `${item.title} ${item.description ?? ""}`.toLowerCase();
+      // Build the source description shown to the teaching-piece
+      // writer. When the thread has specifically-bookmarked messages
+      // (the user flagged individual replies or the root with
+      // `:bookmark:`), pre-pend them as an [EMPHASIS] block so the
+      // writer leans on the user's explicit pick(s) instead of treating
+      // every reply equally. Without this the writer only sees the
+      // generic thread description and the in-thread emphasis is lost.
+      const emphasisBlock =
+        item.bookmarkedExcerpts && item.bookmarkedExcerpts.length > 0
+          ? `[EMPHASIS — messages within this thread the reader explicitly bookmarked; weight them above the surrounding thread content]:\n${item.bookmarkedExcerpts
+              .slice(0, 5)
+              .map((e, i) => `${i + 1}. ${e.slice(0, 400)}`)
+              .join("\n")}`
+          : null;
+      const enrichedDescription = emphasisBlock
+        ? item.description
+          ? `${emphasisBlock}\n\n${item.description}`
+          : emphasisBlock
+        : item.description;
+
+      // Include the bookmarked excerpts in the concept-match haystack
+      // so a thread whose excerpts call out a different concept than
+      // the title can still anchor to the user's emphasis.
+      const haystack =
+        `${item.title} ${item.description ?? ""} ${(item.bookmarkedExcerpts ?? []).join(" ")}`.toLowerCase();
       const matched = activeConcepts
         .filter((c) => haystack.includes(c.canonical_name.toLowerCase()))
         .filter((c) => !existingPieceConceptIds.has(c.id))
@@ -667,7 +691,7 @@ export async function generateDailyBriefing(
           conceptId: concept.id,
           depthScore: concept.depth_score ?? 0,
           sourceType: "current-work",
-          sourceDescription: item.description,
+          sourceDescription: enrichedDescription,
           selectionReasoning: `Bookmarked source: "${item.title.slice(0, 80)}"`,
           priority: 1,
           sourceContext: [sourceCtx],
@@ -684,7 +708,7 @@ export async function generateDailyBriefing(
           conceptId: "",
           depthScore: 0,
           sourceType: "current-work",
-          sourceDescription: item.description,
+          sourceDescription: enrichedDescription,
           selectionReasoning: `Bookmarked source (no matching concept): "${item.title.slice(0, 80)}"`,
           priority: 1,
           sourceContext: [sourceCtx],

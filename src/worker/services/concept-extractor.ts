@@ -22,6 +22,13 @@ interface WorkContextItem {
    *  reaction. Used here to annotate the LLM prompt so the extractor
    *  relaxes its substance bar on these explicitly-opted-in items. */
   bookmarked?: boolean;
+  /** Mirrors `WorkContextItem.bookmarkedExcerpts` in `sources/types.ts`
+   *  — texts of specific messages within a bookmarked Slack thread
+   *  that themselves carry a `:bookmark:` reaction. The extractor
+   *  surfaces them as an `[EMPHASIZED EXCERPTS]` block so the model
+   *  anchors its extracted concept(s) on what the user actually
+   *  flagged, not on incidental thread chatter. */
+  bookmarkedExcerpts?: string[];
 }
 
 interface ExtractedConcept {
@@ -64,7 +71,18 @@ function formatBatch(items: WorkContextItem[]): string {
       const bookmarkTag = item.bookmarked ? " [USER-BOOKMARKED]" : "";
       const desc = item.description ? `\n  ${item.description.slice(0, 300)}` : "";
       const labels = item.labels?.length ? `\n  Labels: ${item.labels.join(", ")}` : "";
-      return `[${item.type}]${bookmarkTag} ${item.title}${desc}${labels}`;
+      // When specific messages within a bookmarked thread were also
+      // bookmarked, surface them as an emphasized block so the
+      // extractor anchors its concept(s) on those specifically-saved
+      // excerpts rather than on the surrounding chatter.
+      const excerpts =
+        item.bookmarked && item.bookmarkedExcerpts && item.bookmarkedExcerpts.length > 0
+          ? `\n  [EMPHASIZED EXCERPTS — bookmarked within the thread, anchor extraction here]:\n${item.bookmarkedExcerpts
+              .slice(0, 3)
+              .map((e) => `    > ${e.slice(0, 250)}`)
+              .join("\n")}`
+          : "";
+      return `[${item.type}]${bookmarkTag} ${item.title}${desc}${labels}${excerpts}`;
     })
     .join("\n\n");
 }
@@ -148,6 +166,13 @@ substantive angle is broader than the message itself, use the
 broader concept. The substance bar still applies to bookmarked items
 in the sense that you should never emit an org/process/ritual noun —
 but you must find SOMETHING teachable to anchor a piece on.
+
+When a USER-BOOKMARKED item also includes an \`[EMPHASIZED EXCERPTS]\`
+block, the listed excerpts are the messages within the thread that the
+reader explicitly flagged. Anchor your extracted concept(s) on the
+substance of those excerpts above the rest of the body — they are the
+reader's "this part specifically matters" hint. If the excerpts and the
+surrounding body point at different concepts, prefer the excerpts.
 
 SUBSTANCE BAR — a concept MUST clear this bar to be extracted:
 - It must be teachable as standalone subject matter — i.e. an experienced

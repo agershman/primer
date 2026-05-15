@@ -99,6 +99,11 @@ For both paths:
 - Bookmarked threads sort to the top of the work-context bar and get a 🔖 prefix on their title.
 - The description fed to the concept extractor includes an explicit "Bookmarked by a teammate (`:bookmark:` reaction)." note so the LLM weights these as high-signal.
 
+**Where you put the reaction decides the scope of what's pulled in:**
+- **Bookmark a thread root** → the whole thread is the unit of attention. Primer fetches the replies, runs the conversation analyzer over the full transcript, and generates a teaching piece against the thread's substance.
+- **Bookmark a single reply (or a standalone message)** → only that message is in scope. The work-context item is scoped down to the bookmarked text and the surrounding thread isn't pulled in — flag a specific point without dragging in the rest of the conversation.
+- **Bookmark the root AND specific replies within the thread** → the whole thread is in scope, AND the specifically-bookmarked replies are surfaced to the concept extractor and the teaching-piece writer as `[EMPHASIS — bookmarked messages]` excerpts. Concept selection and framing anchor on the messages you boosted, with the surrounding thread as context.
+
 Both paths respect the **History window** above — bookmarks on messages older than the window aren't pulled in. `reactions.list` doesn't expose when the reaction was added, so the message's own timestamp is the proxy. If you bookmark an old thread today intending to surface it, you'll need the message itself to fall inside the window.
 
 Setup: add the `reactions:read` and `users:read.email` scopes to your Slack app — see [Slack app + token](/help/credentials/slack) for the full scope list. Without them, only the in-channel any-user path runs.
