@@ -100,10 +100,17 @@ export const userContext = createMiddleware<{
   }
 
   const defaultMap = JSON.stringify(DEFAULT_SIGNAL_SURFACE_MAP);
+  // `show_audit_marks` is explicit (rather than relying on the column
+  // default) because already-deployed D1 databases ran migration 0007
+  // with `DEFAULT 1`. Migration 0008 backfills existing rows to 0 but
+  // can't change the column's stored default — so any new user signing
+  // up on a pre-0008 deployment would otherwise still get a row with
+  // marks ON. Binding 0 here keeps the default-off invariant on every
+  // path, regardless of the schema's stored default.
   await db
     .prepare(
-      `INSERT OR IGNORE INTO user_settings (user_id, budget_cap_monthly, relevance_threshold, near_miss_floor, retention_days, source_config, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      `INSERT OR IGNORE INTO user_settings (user_id, budget_cap_monthly, relevance_threshold, near_miss_floor, retention_days, source_config, show_audit_marks, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, datetime('now'), datetime('now'))`,
     )
     .bind(
       userRow.id,
