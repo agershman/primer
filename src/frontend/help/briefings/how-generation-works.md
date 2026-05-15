@@ -24,6 +24,11 @@ Both flow in automatically; you don't need to do anything per-briefing.
 
 Primer runs each non-bookmarked Slack thread through a single batched Haiku scoring call against your **About + Focus + global Relevance filter prompt** and drops anything below the same `relevanceThreshold` you've tuned for feed scoring (default 0.4). Bookmarked threads (🔖) bypass entirely — explicit `:bookmark:` reactions are an opt-in signal that overrides the LLM gate. The step **fails open**: if scoring errors out, the input passes through unchanged so a transient outage can't strip your Slack work context.
 
+**Where the `:bookmark:` is placed decides the scope:**
+- **Thread root bookmarked** → the whole thread is the unit. The reply transcript is included, the conversation analyzer runs over the full thread, and a teaching piece is generated against the thread's substance.
+- **Only a reply (or a standalone message) bookmarked** → just that message is in scope. The work-context item is scoped down to the bookmarked text; the surrounding thread isn't pulled in. Useful when you want to flag "this specific point" without dragging in the rest of the conversation.
+- **Root + specific replies bookmarked** → the whole thread is in scope AND the specifically-bookmarked replies are surfaced to the extractor and the writer as `[EMPHASIS — bookmarked messages]` excerpts, so concept selection and framing anchor on the messages you boosted.
+
 What was filtered shows up live in the progress timeline (`✕ <thread title> (0.18 — banter)` style) and rolls up into the Analytics waterfall under the `slack_filter` step.
 
 **Step 2 — Extract concepts.** The combined work context is analyzed to identify technical concepts — but bounded by hard rules in the extraction prompt: a substance bar (must be teachable as standalone subject matter), explicit anti-examples (no standups, retros, OKRs, ritual roles), an umbrella rule (close variants collapse into one canonical concept with the others as aliases), and **your Focus statement** as a strong topic filter. **About** flows in as a secondary signal that informs concept granularity (one umbrella concept for a senior platform engineer; finer detail for a less specialized reader). Suppressed concept names are excluded from extraction entirely.

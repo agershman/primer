@@ -38,6 +38,20 @@ interface SlackThread {
    *  the LLM (and the user, if they peek at the work-context bar)
    *  can see why the otherwise-quiet message was included. */
   bookmarked?: boolean;
+  /** True when the bookmark is on the THREAD ROOT (the top-level
+   *  message of a thread, or a standalone message). A root bookmark
+   *  means "include the whole thread"; a bookmark on only a reply
+   *  means "include just that message" — see slackProvider.fetch for
+   *  the two-branch handling. Implicitly false / undefined when only
+   *  reply-level bookmarks exist. */
+  rootBookmarked?: boolean;
+  /** Texts of the specific messages within this thread that carry a
+   *  `:bookmark:` reaction. When a user bookmarks the root message,
+   *  the root text lands here; when they bookmark a reply, the reply
+   *  text lands here too. The teaching pipeline treats these as the
+   *  "emphasized" parts of the thread — see `WorkContextItem.bookmarkedExcerpts`
+   *  in `./types.ts` for the downstream contract. */
+  bookmarkedExcerpts?: string[];
 }
 
 interface RawSlackMessage {
@@ -76,15 +90,29 @@ export function groupAndFilterSlackMessages(rawMessages: RawSlackMessage[], opti
       participants: Set<string>;
       totalChars: number;
       bookmarked: boolean;
+      /** True when the bookmark sits on the THREAD ROOT (root of a
+       *  thread, or a standalone message). Determines downstream
+       *  scoping: root-bookmarked → whole thread is the unit of
+       *  attention; reply-only-bookmarked → just the bookmarked
+       *  messages are. */
+      rootBookmarked: boolean;
+      /** Texts of messages within this thread that themselves carry
+       *  a `:bookmark:` reaction. Tracked separately from `bookmarked`
+       *  (which collapses "any bookmark in this thread → keep") so the
+       *  downstream pipeline can give SPECIAL EMPHASIS to the user's
+       *  explicit pick(s) when a thread is bookmarked AND specific
+       *  messages within it are also bookmarked. */
+      bookmarkedExcerpts: string[];
     }
   >();
 
   for (const msg of messages) {
     const threadKey = msg.thread_ts ?? msg.ts;
-    // A bookmark anywhere in the thread counts. The root carries
-    // most bookmarks in practice (people save threads at the top),
-    // but allowing replies to qualify keeps the semantic clean: any
-    // bookmarked message in a thread → include the thread.
+    // A message is the ROOT of its thread when `thread_ts` is unset
+    // (or equals its own `ts` — Slack APIs vary on this). Anything
+    // else is a reply. Used below to decide whether a bookmark
+    // applies to the whole thread or just to one message.
+    const isRoot = (msg.thread_ts ?? msg.ts) === msg.ts;
     const isBookmarked = includeBookmarked && hasBookmarkReaction(msg);
     // Bookmarked messages bypass the noise / brevity filters; the
     // user has explicitly told us to keep them.
@@ -97,7 +125,11 @@ export function groupAndFilterSlackMessages(rawMessages: RawSlackMessage[], opti
         existing.totalChars += msg.text.length;
       }
       existing.participants.add(msg.user);
-      if (isBookmarked) existing.bookmarked = true;
+      if (isBookmarked) {
+        existing.bookmarked = true;
+        if (isRoot) existing.rootBookmarked = true;
+        if (msg.text.trim().length > 0) existing.bookmarkedExcerpts.push(msg.text);
+      }
     } else {
       threads.set(threadKey, {
         firstText: msg.text,
@@ -108,6 +140,8 @@ export function groupAndFilterSlackMessages(rawMessages: RawSlackMessage[], opti
         participants: new Set([msg.user]),
         totalChars: passesFilter ? msg.text.length : 0,
         bookmarked: isBookmarked,
+        rootBookmarked: isBookmarked && isRoot,
+        bookmarkedExcerpts: isBookmarked && msg.text.trim().length > 0 ? [msg.text] : [],
       });
     }
   }
@@ -130,6 +164,8 @@ export function groupAndFilterSlackMessages(rawMessages: RawSlackMessage[], opti
       channel: thread.channel,
       description,
       bookmarked: thread.bookmarked || undefined,
+      rootBookmarked: thread.rootBookmarked || undefined,
+      bookmarkedExcerpts: thread.bookmarkedExcerpts.length > 0 ? thread.bookmarkedExcerpts : undefined,
     });
   }
 
@@ -294,6 +330,17 @@ export const slackProvider: SourceProvider = {
       messages: string[];
       participantCount: number;
       bookmarked?: boolean;
+      /** Bookmark sits on the THREAD ROOT — the whole thread is the
+       *  unit of attention. When false (but `bookmarked` is true), only
+       *  reply messages are bookmarked and the work-context item is
+       *  scoped to just those bookmarked replies (not the rest of the
+       *  thread). */
+      rootBookmarked?: boolean;
+      /** Texts of specifically-bookmarked messages within this thread,
+       *  populated from both the initial channel-history scan (root /
+       *  cross-channel bookmarks) and the per-thread reply fetch
+       *  (in-thread reply bookmarks). De-duped on insert. */
+      bookmarkedExcerpts?: string[];
       insight?: import("../services/slack-analyzer.js").ConversationInsight;
     }
 
@@ -316,16 +363,93 @@ export const slackProvider: SourceProvider = {
         messages: thread.description ? [thread.title, thread.description] : [thread.title],
         participantCount: 1,
         bookmarked: thread.bookmarked,
+        rootBookmarked: thread.rootBookmarked,
+        bookmarkedExcerpts: thread.bookmarkedExcerpts ? [...thread.bookmarkedExcerpts] : undefined,
       };
+      // Pre-reply-fetch scope-down: when the initial scan already shows
+      // bookmark(s) on replies only (no root bookmark), narrow title /
+      // description / messages to just the bookmarked excerpts. The
+      // reply-fetch branch below may widen back to full-thread if it
+      // discovers the root was bookmarked after all; otherwise this is
+      // the final shape and we don't pull in the surrounding thread.
+      if (base.bookmarked && !base.rootBookmarked && base.bookmarkedExcerpts && base.bookmarkedExcerpts.length > 0) {
+        base.messages = [...base.bookmarkedExcerpts];
+        base.description = base.bookmarkedExcerpts.join("\n").slice(0, 1000);
+        base.title = base.bookmarkedExcerpts[0].slice(0, 120);
+      }
 
       if (channelId) {
         try {
           const replies = await slackClient.getThreadReplies(channelId, thread.id, 30);
-          if (replies.length > 1) {
-            const participants = new Set(replies.map((r) => r.user));
-            base.messages = replies.map((r) => normalizeSlackText(r.text)).filter((t) => t.trim().length > 10);
-            base.participantCount = participants.size;
-            base.description = base.messages.slice(0, 8).join("\n").slice(0, 1000);
+          // Normalize every reply once up-front so all of the
+          // bookmark-detection + content-scoping branches below can
+          // reuse the same array without re-walking Slack's mrkdwn
+          // escapes per pass.
+          const normalized = replies.map((r) => ({
+            text: normalizeSlackText(r.text),
+            user: r.user,
+            bookmarked: hasBookmarkReaction(r),
+          }));
+          if (normalized.length > 1) {
+            const participants = new Set(normalized.map((r) => r.user));
+            // First pass: identify any new bookmarks the reply-fetch
+            // exposes that the initial scan didn't (teammates'
+            // bookmarks on replies in a monitored channel, OR a root
+            // bookmark we couldn't see because the root entered via a
+            // cross-channel scan of just one reply).
+            const root = normalized[0];
+            if (root?.bookmarked) {
+              // Promote: the root IS bookmarked. Whether or not we
+              // already knew about the root via the initial scan,
+              // this confirms whole-thread scope.
+              base.rootBookmarked = true;
+              base.bookmarked = true;
+              if (root.text.trim().length > 0) {
+                const existing = base.bookmarkedExcerpts ?? [];
+                if (!existing.includes(root.text)) {
+                  base.bookmarkedExcerpts = [root.text, ...existing];
+                }
+              }
+            }
+            const replyBookmarks = normalized
+              .slice(1)
+              .filter((r) => r.bookmarked)
+              .map((r) => r.text)
+              .filter((t) => t.trim().length > 0);
+            if (replyBookmarks.length > 0) {
+              const seen = new Set(base.bookmarkedExcerpts ?? []);
+              const merged = [...(base.bookmarkedExcerpts ?? [])];
+              for (const text of replyBookmarks) {
+                if (seen.has(text)) continue;
+                seen.add(text);
+                merged.push(text);
+              }
+              base.bookmarkedExcerpts = merged;
+              base.bookmarked = true;
+            }
+
+            // Second pass: scope the work-context content. Two cases:
+            //  (a) rootBookmarked → "the whole thread is the unit of
+            //      attention." Include the full reply transcript; the
+            //      bookmarkedExcerpts emphasis still steers the LLM
+            //      toward the user's flagged messages within it.
+            //  (b) !rootBookmarked && bookmarked → "the user bookmarked
+            //      just specific replies." Scope the item DOWN to just
+            //      those bookmarked replies — we don't pull in the
+            //      surrounding thread because the user's signal was
+            //      explicitly per-message. Title becomes the first
+            //      bookmarked excerpt so the work-context bar reads as
+            //      the message, not the (unrelated) root.
+            if (base.rootBookmarked || !base.bookmarked) {
+              base.messages = normalized.map((r) => r.text).filter((t) => t.trim().length > 10);
+              base.participantCount = participants.size;
+              base.description = base.messages.slice(0, 8).join("\n").slice(0, 1000);
+            } else if (base.bookmarked && base.bookmarkedExcerpts && base.bookmarkedExcerpts.length > 0) {
+              base.messages = [...base.bookmarkedExcerpts];
+              base.participantCount = 1;
+              base.description = base.bookmarkedExcerpts.join("\n").slice(0, 1000);
+              base.title = base.bookmarkedExcerpts[0].slice(0, 120);
+            }
           }
         } catch {
           // Fall back to grouped messages.
@@ -345,14 +469,27 @@ export const slackProvider: SourceProvider = {
     }
 
     for (const thread of rawThreads.slice(10)) {
+      // Same scope-down rule as the top-10 path: reply-only bookmarks
+      // → just the bookmarked messages, root bookmarks → whole thread.
+      const replyOnly =
+        thread.bookmarked &&
+        !thread.rootBookmarked &&
+        thread.bookmarkedExcerpts &&
+        thread.bookmarkedExcerpts.length > 0;
       threadsWithReplies.push({
         id: thread.id,
-        title: thread.title,
+        title: replyOnly ? thread.bookmarkedExcerpts![0].slice(0, 120) : thread.title,
         url: thread.url,
-        description: thread.description,
-        messages: thread.description ? [thread.title, thread.description] : [thread.title],
+        description: replyOnly ? thread.bookmarkedExcerpts!.join("\n").slice(0, 1000) : thread.description,
+        messages: replyOnly
+          ? [...thread.bookmarkedExcerpts!]
+          : thread.description
+            ? [thread.title, thread.description]
+            : [thread.title],
         participantCount: 1,
         bookmarked: thread.bookmarked,
+        rootBookmarked: thread.rootBookmarked,
+        bookmarkedExcerpts: thread.bookmarkedExcerpts,
       });
     }
 
@@ -374,6 +511,7 @@ export const slackProvider: SourceProvider = {
               channel: t.channel,
               messages: t.messages,
               participantCount: t.participantCount,
+              bookmarkedExcerpts: t.bookmarkedExcerpts,
             })),
           conceptExtractionSpec,
         );
@@ -429,6 +567,13 @@ export const slackProvider: SourceProvider = {
         // concept extractor + teaching-target selector can act on it
         // without parsing the 🔖 title prefix.
         bookmarked: thread.bookmarked || undefined,
+        // Pass the specifically-bookmarked-message texts through so
+        // the concept extractor and the teaching writer can give them
+        // extra weight relative to the rest of the thread. Empty /
+        // missing → no emphasis (the existing "thread-level bookmark"
+        // semantics still apply via `bookmarked`).
+        bookmarkedExcerpts:
+          thread.bookmarkedExcerpts && thread.bookmarkedExcerpts.length > 0 ? thread.bookmarkedExcerpts : undefined,
       });
     }
 

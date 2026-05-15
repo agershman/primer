@@ -24,6 +24,13 @@ interface AnalyzerInput {
   channel?: string;
   messages: string[];
   participantCount: number;
+  /** Texts of messages within this thread that carry an explicit
+   *  `:bookmark:` reaction. When non-empty, the analyzer prompt
+   *  highlights them as the user-flagged emphasis points so the model
+   *  weights its summary / learningOpportunities toward them rather
+   *  than treating every reply equally. Optional — most threads have
+   *  no emphasis. */
+  bookmarkedExcerpts?: string[];
 }
 
 interface AnalysisResult {
@@ -63,7 +70,20 @@ export async function analyzeSlackConversations(
   const threadBlocks = substantive.map((t) => {
     const msgs = t.messages.slice(0, MAX_MESSAGES_PER_THREAD);
     const transcript = msgs.join("\n---\n").slice(0, MAX_CHARS_PER_THREAD);
-    return `## Thread: ${t.title.slice(0, 100)}\nParticipants: ${t.participantCount} | Messages: ${t.messages.length}\n\n${transcript}`;
+    // When specific messages within the thread carry a `:bookmark:`
+    // reaction, surface them as an emphasized block AHEAD of the
+    // transcript. The block uses a clearly-labeled sentinel
+    // (`[EMPHASIS — BOOKMARKED MESSAGES]`) the system prompt knows to
+    // weight more heavily when picking learningOpportunities and the
+    // summary. Cap at ~5 excerpts to keep the prompt budget bounded.
+    const emphasisBlock =
+      t.bookmarkedExcerpts && t.bookmarkedExcerpts.length > 0
+        ? `\n\n[EMPHASIS — BOOKMARKED MESSAGES] The user explicitly flagged these messages with a \`:bookmark:\` reaction; weight them above the rest of the transcript when picking topics + learning opportunities:\n${t.bookmarkedExcerpts
+            .slice(0, 5)
+            .map((e, i) => `${i + 1}. ${e.slice(0, 400)}`)
+            .join("\n")}`
+        : "";
+    return `## Thread: ${t.title.slice(0, 100)}\nParticipants: ${t.participantCount} | Messages: ${t.messages.length}${emphasisBlock}\n\n${transcript}`;
   });
 
   const system = `You analyze Slack conversations to identify learning opportunities for a software engineer.
@@ -78,6 +98,8 @@ For each thread, identify:
 
 Focus on TECHNICAL substance. Skip social chatter, scheduling logistics, and off-topic tangents.
 For learningOpportunities, be specific and actionable — not "learn about Kubernetes" but "How pod disruption budgets interact with node draining during consolidation."
+
+EMPHASIS — when a thread block begins with \`[EMPHASIS — BOOKMARKED MESSAGES]\`, the listed excerpts were explicitly flagged by the reader. Weight them above the rest of the transcript when picking topics + learningOpportunities, and let them steer the summary toward what the reader actually saved. Anchor at least one learningOpportunity to the substance of the bookmarked excerpts when possible.
 
 Return JSON: { "threads": [{ "threadIndex": 0, "topics": [...], "questionsRaised": [...], "decisionsOrOutcomes": [...], "knowledgeGaps": [...], "learningOpportunities": [...], "summary": "..." }, ...] }`;
 

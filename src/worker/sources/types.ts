@@ -20,6 +20,17 @@ export interface WorkContextItem {
    *  bypasses the depth + recent-concept gates so a bookmarked
    *  message reliably produces a teaching piece. */
   bookmarked?: boolean;
+  /** Texts of the specific messages WITHIN a bookmarked Slack thread
+   *  that themselves carry a `:bookmark:` reaction. When a user
+   *  bookmarks the thread root the root text lands here; when a user
+   *  bookmarks individual replies, those reply texts land here. Used
+   *  by the concept extractor, the slack analyzer, and the teaching-
+   *  piece writer to give SPECIAL EMPHASIS to the parts of the thread
+   *  the user explicitly flagged — distinct from the general "this
+   *  thread is in scope because something inside it is bookmarked"
+   *  signal carried by `bookmarked`. Empty / undefined for items that
+   *  aren't bookmarked or where no excerpt could be captured. */
+  bookmarkedExcerpts?: string[];
 }
 
 export interface SourceInstanceRow {
