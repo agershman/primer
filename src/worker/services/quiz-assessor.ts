@@ -82,7 +82,7 @@ export async function generateQuiz(
 ${aboutBlock}${focusBlock}
 The question should be open-ended and reveal HOW DEEPLY they understand the concept, not just whether they've heard of it.
 
-FACTUAL DISCIPLINE — the question text itself is audited after generation:
+FACTUAL DISCIPLINE — calibration depends on the question being well-grounded:
 - Do NOT embed factual claims that could be wrong (e.g. "Kubernetes 2.0 introduced X..."). Frame the question conceptually so the premise doesn't carry version numbers, release dates, or specific quotes you can't verify.
 - If you must reference a specific tool/version/feature, only do so when it is widely-known and durable (e.g. "Linux containers" is fine; "the new feature shipped last month" is not).
 - A flawed premise in the question miscalibrates the user's depth score and is the highest-cost mistake here — prefer a more general framing over a precise-but-uncertain one.

@@ -80,13 +80,6 @@ interface PipelinePiece {
   partNumber: number | null;
   position: number;
   targetDepth: number | null;
-  auditSummary: {
-    status: string;
-    totalClaims: number;
-    patchedCount: number;
-    droppedCount: number;
-    groundedWebCount: number;
-  } | null;
 }
 
 interface PipelineResponse {
@@ -123,9 +116,7 @@ const STEP_LABELS: Record<string, string> = {
   selecting: "Selecting targets",
   generating_pieces: "Writing teaching pieces",
   teaching_piece: "Each teaching piece",
-  piece_audit: "Auditing pieces",
   quiz: "Calibration quiz",
-  quiz_audit: "Auditing quiz",
   finishing: "Finishing up",
 };
 
@@ -265,13 +256,6 @@ function TraceBody({ data }: { data: PipelineResponse }) {
                 <SourceTag value={p.sourceType} />
                 {p.partNumber !== null && (
                   <span className="font-mono text-[10px] text-text-faint">part {p.partNumber}</span>
-                )}
-                {p.auditSummary && (
-                  <span className="font-mono text-[10px] text-text-faint">
-                    audit: {p.auditSummary.status} · {p.auditSummary.totalClaims} claims
-                    {p.auditSummary.patchedCount > 0 && ` · ${p.auditSummary.patchedCount} patched`}
-                    {p.auditSummary.droppedCount > 0 && ` · ${p.auditSummary.droppedCount} dropped`}
-                  </span>
                 )}
               </li>
             ))}

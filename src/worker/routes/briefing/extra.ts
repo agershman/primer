@@ -163,27 +163,12 @@ briefingExtraRoutes.get("/briefing/:id/pipeline", async (c) => {
       relevance_concepts: string;
     }>();
 
-  // Per-piece rollup. Audit summary is pulled via the same correlated
-  // subquery pattern read.ts uses so the panel can show "this piece
-  // had 2 claims dropped" inline without a second fetch.
   const pieces = await c.env.DB.prepare(
-    `SELECT tp.id, tp.title, tp.selection_reasoning, tp.source_type,
-            tp.series_id, tp.part_number, tp.position, tp.target_depth,
-            a.status AS audit_status,
-            a.total_claims AS audit_total_claims,
-            a.patched_count AS audit_patched_count,
-            a.dropped_count AS audit_dropped_count,
-            a.grounded_web_count AS audit_grounded_web_count
-       FROM teaching_pieces tp
-       LEFT JOIN audits a
-         ON a.target_kind = 'piece'
-        AND a.target_id = tp.id
-        AND a.pass = (
-          SELECT MAX(pass) FROM audits
-           WHERE target_kind = 'piece' AND target_id = tp.id
-        )
-      WHERE tp.briefing_id = ? AND tp.user_id = ?
-      ORDER BY tp.position ASC`,
+    `SELECT id, title, selection_reasoning, source_type,
+            series_id, part_number, position, target_depth
+       FROM teaching_pieces
+      WHERE briefing_id = ? AND user_id = ?
+      ORDER BY position ASC`,
   )
     .bind(briefingId, user.userId)
     .all<{
@@ -195,11 +180,6 @@ briefingExtraRoutes.get("/briefing/:id/pipeline", async (c) => {
       part_number: number | null;
       position: number;
       target_depth: number | null;
-      audit_status: string | null;
-      audit_total_claims: number | null;
-      audit_patched_count: number | null;
-      audit_dropped_count: number | null;
-      audit_grounded_web_count: number | null;
     }>();
 
   const briefingMetadata = JSON.parse(briefing.metadata || "{}");
@@ -257,15 +237,6 @@ briefingExtraRoutes.get("/briefing/:id/pipeline", async (c) => {
       partNumber: p.part_number,
       position: p.position,
       targetDepth: p.target_depth,
-      auditSummary: p.audit_status
-        ? {
-            status: p.audit_status,
-            totalClaims: p.audit_total_claims ?? 0,
-            patchedCount: p.audit_patched_count ?? 0,
-            droppedCount: p.audit_dropped_count ?? 0,
-            groundedWebCount: p.audit_grounded_web_count ?? 0,
-          }
-        : null,
     })),
   });
 });

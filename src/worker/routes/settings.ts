@@ -53,21 +53,22 @@ settingsRoutes.patch("/settings", async (c) => {
 
   if (budgetCap !== undefined) {
     const val = Number(budgetCap);
-    if (isNaN(val) || val < 0) return c.json({ error: "budgetCapMonthly must be a non-negative number" }, 400);
+    if (Number.isNaN(val) || val < 0) return c.json({ error: "budgetCapMonthly must be a non-negative number" }, 400);
     updates.push("budget_cap_monthly = ?");
     binds.push(val);
   }
 
   if (relevanceThreshold !== undefined) {
     const val = Number(relevanceThreshold);
-    if (isNaN(val) || val < 0 || val > 1) return c.json({ error: "relevanceThreshold must be between 0 and 1" }, 400);
+    if (Number.isNaN(val) || val < 0 || val > 1)
+      return c.json({ error: "relevanceThreshold must be between 0 and 1" }, 400);
     updates.push("relevance_threshold = ?");
     binds.push(val);
   }
 
   if (nearMissFloor !== undefined) {
     const val = Number(nearMissFloor);
-    if (isNaN(val) || val < 0 || val > 1) return c.json({ error: "nearMissFloor must be between 0 and 1" }, 400);
+    if (Number.isNaN(val) || val < 0 || val > 1) return c.json({ error: "nearMissFloor must be between 0 and 1" }, 400);
     updates.push("near_miss_floor = ?");
     binds.push(val);
   }
@@ -107,20 +108,6 @@ settingsRoutes.patch("/settings", async (c) => {
       return c.json({ error: "sourceFilterOverrides must be a JSON object" }, 400);
     updates.push("source_filter_overrides = ?");
     binds.push(JSON.stringify(sourceFilterOverrides));
-  }
-
-  // Per-user toggle for the inline wavy-underline audit marks on
-  // teaching pieces, deep dives, and quizzes. User-level on purpose
-  // — this is reading-comfort personalization, not deployment-wide
-  // config. Stored as 0/1 in D1; serialized as boolean over the
-  // wire (see the GET response shape below).
-  const showAuditMarks = body.showAuditMarks ?? body.show_audit_marks;
-  if (showAuditMarks !== undefined) {
-    if (typeof showAuditMarks !== "boolean") {
-      return c.json({ error: "showAuditMarks must be a boolean" }, 400);
-    }
-    updates.push("show_audit_marks = ?");
-    binds.push(showAuditMarks ? 1 : 0);
   }
 
   // Per-user opt-in list of source IDs. User-level on purpose: this
@@ -172,7 +159,6 @@ settingsRoutes.patch("/settings", async (c) => {
     filter_prompt: string | null;
     source_filter_overrides: string | null;
     enabled_source_ids: string | null;
-    show_audit_marks: number;
   }>();
 
   let overrides: Record<string, string> = {};
@@ -206,7 +192,6 @@ settingsRoutes.patch("/settings", async (c) => {
     filterPrompt: settingsRow?.filter_prompt ?? null,
     sourceFilterOverrides: overrides,
     enabledSourceIds: updatedEnabledSourceIds,
-    showAuditMarks: Number(settingsRow?.show_audit_marks ?? 0) === 1,
   };
 
   return c.json({ settings: updatedSettings });

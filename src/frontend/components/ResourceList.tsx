@@ -9,6 +9,7 @@ const TYPE_ICONS: Record<string, string> = {
   pr: "⊕",
   notion: "◎",
   google_doc: "◎",
+  web: "◐",
   other: "○",
 };
 

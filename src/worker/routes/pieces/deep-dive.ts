@@ -272,14 +272,11 @@ pieceDeepDiveRoutes.get("/piece/:id/deep-dive", async (c) => {
       const llm = llmClient(c.env);
       const surfaceMap = user.settings?.signalSurfaceMap as Record<string, unknown> | null | undefined;
       const spec = resolveModel(surfaceMap, "deepDive");
-      const auditSpec = resolveModel(surfaceMap, "audit");
-      const auditPatchSpec = resolveModel(surfaceMap, "auditPatch");
 
       const existingContent: import("../../types.js").ContentBlock[] = JSON.parse(fullPiece.content || "[]");
-      // Parse the parent piece's source bundle once — threaded into
-      // both the writer (for inline [[ref:...]] tags) and the auditor
-      // (for verification against the same sources the parent claimed
-      // to derive from).
+      // Parent piece's source bundle — surfaced to the writer for
+      // company-internal grounding. External claims go through the
+      // writer's hosted web_search tool.
       const parentSources: Array<{ type: string; id?: string; url?: string; title?: string; summary?: string }> =
         JSON.parse(fullPiece.source_context ?? "[]");
 
@@ -294,28 +291,13 @@ pieceDeepDiveRoutes.get("/piece/:id/deep-dive", async (c) => {
         { modelSpec: spec, aboutStatement: user.aboutStatement, sources: parentSources },
       );
 
-      // Audit the deep dive against the parent's source bundle + the
-      // web-search backstop. Fail-open: the auditor swallows its own
-      // exceptions and returns the original content with status='failed'.
-      const { auditDeepDive } = await import("../../services/piece-auditor.js");
-      const audited = await auditDeepDive({
-        db,
-        userId: user.userId,
-        llm,
-        targetId: pieceId,
-        content: result.content,
-        sources: parentSources,
-        auditSpec,
-        patchSpec: auditPatchSpec,
-      });
-
       await db
         .prepare(
           `UPDATE teaching_pieces
              SET deep_dive_content = ?, deep_dive_read_time = ?, has_deep_dive = 1
            WHERE id = ? AND user_id = ?`,
         )
-        .bind(JSON.stringify(audited.content), result.readTimeMinutes, pieceId, user.userId)
+        .bind(JSON.stringify(result.content), result.readTimeMinutes, pieceId, user.userId)
         .run();
 
       for (let i = 0; i < result.resources.length; i++) {
@@ -354,7 +336,7 @@ pieceDeepDiveRoutes.get("/piece/:id/deep-dive", async (c) => {
       return {
         status: "ready",
         readTime: result.readTimeMinutes,
-        content: audited.content,
+        content: result.content,
         resources: insertedResources.results ?? [],
       };
     } catch (err) {

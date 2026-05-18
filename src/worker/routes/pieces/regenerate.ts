@@ -70,9 +70,9 @@ pieceRegenerateRoutes.post("/piece/:id/regenerate", async (c) => {
     const llm = llmClient(c.env);
     const conceptIds: string[] = JSON.parse(piece.concepts || "[]");
 
-    // Parse the original source bundle so the regenerated piece can
-    // cite the same enrichments via inline [[ref:...]] tags, and the
-    // auditor verifies against the same set.
+    // Original source bundle — surfaced to the writer for
+    // company-internal grounding (the writer reaches for web_search
+    // for external claims).
     const sourceContext: Array<{ type: string; id?: string; url?: string; title?: string; summary?: string }> =
       JSON.parse(piece.source_context ?? "[]");
 
@@ -101,26 +101,6 @@ pieceRegenerateRoutes.post("/piece/:id/regenerate", async (c) => {
       sourceContext,
     });
 
-    // Re-run the audit so the regenerated piece gets the same
-    // grounding bar as a fresh generation. Resolve audit/auditPatch
-    // model slots from the same admin overrides the briefing pipeline
-    // uses, and fail-open (auditPiece swallows its own exceptions).
-    const { resolveModel } = await import("../../config/models.js");
-    const { auditPiece } = await import("../../services/piece-auditor.js");
-    const surfaceMap = user.settings?.signalSurfaceMap as Record<string, unknown> | null | undefined;
-    const auditSpec = resolveModel(surfaceMap, "audit");
-    const auditPatchSpec = resolveModel(surfaceMap, "auditPatch");
-    const audited = await auditPiece({
-      db,
-      userId: user.userId,
-      llm,
-      targetId: pieceId,
-      content: result.content,
-      sources: sourceContext,
-      auditSpec,
-      patchSpec: auditPatchSpec,
-    });
-
     await db
       .prepare(
         `UPDATE teaching_pieces
@@ -131,7 +111,7 @@ pieceRegenerateRoutes.post("/piece/:id/regenerate", async (c) => {
       .bind(
         result.title,
         result.pieceType,
-        JSON.stringify(audited.content),
+        JSON.stringify(result.content),
         result.readTimeMinutes,
         result.modelUsed,
         pieceId,
@@ -174,11 +154,10 @@ pieceRegenerateRoutes.post("/piece/:id/regenerate", async (c) => {
         id: pieceId,
         title: result.title,
         piece_type: result.pieceType,
-        content: audited.content,
+        content: result.content,
         read_time_minutes: result.readTimeMinutes,
         model_used: result.modelUsed,
         resources: resources.results,
-        audit_summary: audited.audit,
       },
     });
   } catch (err) {

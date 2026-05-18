@@ -2,6 +2,7 @@ import { DEPTH_LABELS } from "../config/constants.js";
 import { DEFAULT_MODELS, lookupCatalogById } from "../config/models.js";
 import { recordTokenUsage } from "../db/queries.js";
 import type { LLMClient, ModelSpec } from "../integrations/llm/types.js";
+import { supportsWebSearch } from "../integrations/web-search.js";
 import type { ContentBlock, Resource } from "../types.js";
 
 export type PieceType = "60-second" | "walkthrough" | "deep-dive" | "readiness";
@@ -73,13 +74,12 @@ export interface TeachingGenerateOptions {
    */
   continuation?: ContinuationContext | null;
   /**
-   * Source bundle the writer should cite via inline `[[ref:...]]` tags.
-   * The auditor pass that runs after this generator uses the same
-   * bundle to verify the writer's claims, so anything not listed here
-   * cannot be cited and any tag pointing at a non-listed id is a
-   * fabricated citation (which the auditor will catch). Optional for
-   * callers that don't have a structured bundle (e.g. ad-hoc
-   * regenerate paths) — the writer will then emit no tags.
+   * Source bundle the writer can ground claims in. Surfaced to the
+   * writer in the user message as "Sources available for grounding"
+   * — the writer uses these for company-internal facts and reaches
+   * for the hosted `web_search` tool for external claims. Optional
+   * for callers that don't have a structured bundle (e.g. ad-hoc
+   * regenerate paths).
    */
   sourceContext?: Array<{ type: string; id?: string; url?: string; title?: string; summary?: string }>;
 }
@@ -155,20 +155,16 @@ CODE AND TECHNICAL DETAIL — route on the ABOUT block:
 - If the reader is **non-technical**: prefer prose. Avoid code blocks unless the source material the piece is grounded in genuinely contains code (e.g. you're explaining a PR snippet they need context on), and even then introduce the snippet with a one-line plain-English summary. Inline \`code\` is fine for product / system names and concrete values the reader will see in their tools. Don't show shell commands or pseudocode that the reader has no use for.
 - When in doubt, lean toward less code and more prose — code that doesn't earn its space is noise.
 
+GROUNDING — every factual claim must be anchored:
+1. For company-internal facts (project names, team behavior, incident details, ticket status, internal metrics, named individuals): use ONLY the supplied "Sources available for grounding" bundle below. Do NOT use the web_search tool for these — you will not find them, and confident-sounding guesses will be wrong. If the bundle doesn't cover the internal claim you want to make, qualify it or omit it.
+2. For external technical claims (version numbers, vendor behavior, public APIs, RFCs, well-known incidents, library defaults, syntax): prefer the source bundle when it covers the claim. Otherwise invoke the \`web_search\` tool to verify against official docs, RFCs, vendor changelogs, or the project's own repo. Prefer authoritative primary sources over blog posts.
+3. If you cannot anchor a claim either way, qualify it ("some teams report...", "in many setups...") or omit it. Never assert a specific percentage, version, vendor behavior, date, or quote you have not verified.
+
 CITATIONS AND LINKS:
 - ONLY use inline links ({{Label||url}}) when you can point to a SPECIFIC page the reader can visit: official docs, a blog post, an RFC, a GitHub repo, a paper, or release notes.
 - NEVER link to company homepages, Wikipedia articles, or generic marketing pages. If you mention Kubernetes, link to the relevant docs page, not kubernetes.io.
 - If you cannot point to a specific source for a claim, do NOT create a link — just state the fact plainly.
-- If you are uncertain whether something is accurate, qualify it: "some organizations have adopted..." rather than asserting "Company X published...".
 - Resources at the end should be pages the reader can actually learn from — not vanity URLs.
-
-INLINE REF TAGS — anchoring claims to the source bundle:
-- When a sentence makes a factual claim that comes from the source bundle below (Linear tickets, Slack threads, incidents, articles), append an inline ref tag at the end of that sentence using the format \`[[ref:<enrichment-id>]]\`.
-- The \`<enrichment-id>\` MUST be one of the allowed IDs supplied in the user message. Do NOT invent IDs.
-- A sentence can carry multiple tags if it draws on multiple sources: \`...the rollback was triggered manually [[ref:linear_issue:CIN-1234]] [[ref:slack_thread:C04567/p1714]].\`
-- Place the tag IMMEDIATELY before the closing punctuation, like a citation. The frontend strips them from the rendered text and uses them to drive the audit indicator + the per-claim popover, so they must be present in the JSON output as written.
-- If a sentence is general background that the source bundle doesn't speak to, DO NOT add a tag — an unsupported tag is worse than no tag (the auditor will flag it as a fabricated citation).
-- This applies to all \`text\` and \`heading\` blocks. Do NOT embed ref tags inside \`code\` or \`diagram\` blocks.
 
 ${depthSystemPrompt(target.depthScore)}
 
@@ -209,32 +205,33 @@ Content can include code blocks (type "code" with a language) and mermaid diagra
     );
   }
 
-  // Surface the allowed enrichment IDs the writer can use in
-  // `[[ref:...]]` tags. Sources without a stable id fall back to
-  // their URL — matches the auditor's `allowedRefs` derivation in
-  // `piece-auditor.ts`.
-  const allowedRefs = (options.sourceContext ?? [])
-    .map((s) => {
-      const key = (s as { id?: string; url?: string }).id ?? (s as { url?: string }).url;
-      if (!key) return null;
-      const title = (s as { title?: string }).title ?? "";
-      return `  - ${(s as { type: string }).type}:${key}${title ? ` — ${title}` : ""}`;
-    })
-    .filter((line): line is string => line !== null);
-  if (allowedRefs.length > 0) {
+  // Render the source bundle the writer can ground company-internal
+  // claims in. Sources without a stable id fall back to their URL.
+  const bundleLines = (options.sourceContext ?? []).map((s) => {
+    const key = (s as { id?: string; url?: string }).id ?? (s as { url?: string }).url;
+    const title = (s as { title?: string }).title ?? "";
+    const label = key ? `${(s as { type: string }).type}:${key}` : (s as { type: string }).type;
+    return `  - ${label}${title ? ` — ${title}` : ""}`;
+  });
+  if (bundleLines.length > 0) {
     sourceContextLines.push(
-      `Allowed [[ref:...]] IDs (use any sentence-tag verbatim from this list, no others):\n${allowedRefs.join("\n")}`,
+      `Sources available for grounding (company-internal — use these for ticket/incident/team specifics, never invent them):\n${bundleLines.join("\n")}`,
     );
   }
 
   const userMessage = `Write a ${pieceType} teaching piece about "${target.conceptName}" (category: ${target.category ?? "general"}).
 ${sourceContextLines.length > 0 ? "\n" + sourceContextLines.join("\n\n") : ""}`;
 
-  const { result, usage } = await llm.generateJson<{
+  const { result, usage, webSearchResults } = await llm.generateJson<{
     title: string;
     content: ContentBlock[];
     resources: Resource[];
-  }>({ spec, system, user: userMessage });
+  }>({
+    spec,
+    system,
+    user: userMessage,
+    ...(supportsWebSearch(spec) ? { serverTools: [{ kind: "web_search", maxUses: 3 }] } : {}),
+  });
 
   await recordTokenUsage(db, userId, "teaching_generation", spec, usage);
 
@@ -243,15 +240,27 @@ ${sourceContextLines.length > 0 ? "\n" + sourceContextLines.join("\n\n") : ""}`;
     .reduce((sum, b) => sum + b.value.split(/\s+/).length, 0);
   const readTime = Math.max(1, Math.ceil(wordCount / 200));
 
+  const writerResources: Resource[] = (result.resources ?? []).map((r) => ({
+    label: r.label,
+    url: r.url,
+    type: r.type ?? "other",
+  }));
+
+  // Append public sources the writer consulted via `web_search` during
+  // drafting. The reader sees these alongside writer-curated resources;
+  // the `web` type makes them visually distinct in `ResourceList`.
+  // De-duplicate against URLs the writer already cited so we don't
+  // double-list the same page.
+  const seenUrls = new Set(writerResources.map((r) => r.url));
+  const webResources: Resource[] = (webSearchResults ?? [])
+    .filter((w) => w.url && !seenUrls.has(w.url))
+    .map((w) => ({ label: w.title || w.url, url: w.url, type: "web" as const }));
+
   return {
     title: result.title,
     pieceType,
     content: result.content,
-    resources: (result.resources ?? []).map((r) => ({
-      label: r.label,
-      url: r.url,
-      type: r.type ?? "other",
-    })),
+    resources: [...writerResources, ...webResources],
     readTimeMinutes: readTime,
     modelUsed: spec.model,
   };
