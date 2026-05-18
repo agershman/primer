@@ -14,7 +14,8 @@
 
 import { Hono } from "hono";
 import { createNotification, transitionNotification } from "../../db/notifications-queries.js";
-import type { Env, UserContext } from "../../types.js";
+import { stripCiteTags } from "../../services/content-cleanup.js";
+import type { ContentBlock, Env, UserContext } from "../../types.js";
 
 type AppEnv = { Bindings: Env; Variables: { user: UserContext } };
 
@@ -82,7 +83,9 @@ pieceDeepDiveRoutes.get("/piece/:id/deep-dive", async (c) => {
     }
 
     return c.json({
-      content: JSON.parse(piece.deep_dive_content),
+      // Defensive strip of `<cite>` tags for deep dives persisted
+      // before the cleanup landed. See services/content-cleanup.ts.
+      content: stripCiteTags(JSON.parse(piece.deep_dive_content) as ContentBlock[]),
       readTime: piece.deep_dive_read_time,
       resources: resources.results,
       status: "ready",

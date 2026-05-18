@@ -4,6 +4,7 @@ import { recordTokenUsage } from "../db/queries.js";
 import type { LLMClient, ModelSpec } from "../integrations/llm/types.js";
 import { supportsWebSearch } from "../integrations/web-search.js";
 import type { ContentBlock, Resource } from "../types.js";
+import { stripCiteTags } from "./content-cleanup.js";
 
 export type PieceType = "60-second" | "walkthrough" | "deep-dive" | "readiness";
 
@@ -165,6 +166,7 @@ CITATIONS AND LINKS:
 - NEVER link to company homepages, Wikipedia articles, or generic marketing pages. If you mention Kubernetes, link to the relevant docs page, not kubernetes.io.
 - If you cannot point to a specific source for a claim, do NOT create a link — just state the fact plainly.
 - Resources at the end should be pages the reader can actually learn from — not vanity URLs.
+- Do NOT wrap cited spans in \`<cite>\` tags, \`[1]\`-style footnote markers, or any other inline citation markup. The web_search tool's results are captured separately and surfaced to the reader as a list of consulted sources beneath your prose — your job is to write clean readable prose, not to annotate which spans came from which result.
 
 ${depthSystemPrompt(target.depthScore)}
 
@@ -235,7 +237,15 @@ ${sourceContextLines.length > 0 ? "\n" + sourceContextLines.join("\n\n") : ""}`;
 
   await recordTokenUsage(db, userId, "teaching_generation", spec, usage);
 
-  const wordCount = result.content
+  // Anthropic's web_search models like to wrap cited spans in
+  // `<cite index="...">...</cite>` tags inline when they have web
+  // results, despite the prompt telling them not to. Strip these
+  // defensively before persistence so they never reach the reader.
+  // The actual citation data lives on `webSearchResults` and surfaces
+  // as `web`-type resources at the bottom of the piece.
+  const cleanedContent = stripCiteTags(result.content);
+
+  const wordCount = cleanedContent
     .filter((b) => b.type === "text")
     .reduce((sum, b) => sum + b.value.split(/\s+/).length, 0);
   const readTime = Math.max(1, Math.ceil(wordCount / 200));
@@ -259,7 +269,7 @@ ${sourceContextLines.length > 0 ? "\n" + sourceContextLines.join("\n\n") : ""}`;
   return {
     title: result.title,
     pieceType,
-    content: result.content,
+    content: cleanedContent,
     resources: [...writerResources, ...webResources],
     readTimeMinutes: readTime,
     modelUsed: spec.model,

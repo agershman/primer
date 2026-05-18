@@ -11,7 +11,8 @@
  */
 
 import { Hono } from "hono";
-import type { Env, UserContext } from "../../types.js";
+import { stripCiteTags } from "../../services/content-cleanup.js";
+import type { ContentBlock, Env, UserContext } from "../../types.js";
 import { shiftDate, userToday } from "../../util/time.js";
 import { isZombie, parseRedundantDrafts, todayFor } from "./shared.js";
 
@@ -102,9 +103,13 @@ briefingReadRoutes.get("/briefing/today", async (c) => {
       )
         .bind(piece.id)
         .all();
+      // Defensive strip of `<cite>` tags from historical pieces the
+      // writer leaked them into. New generations are already clean
+      // (see services/content-cleanup.ts); this catches anything
+      // persisted before the fix shipped.
       return {
         ...piece,
-        content: JSON.parse((piece.content as string) || "[]"),
+        content: stripCiteTags(JSON.parse((piece.content as string) || "[]") as ContentBlock[]),
         concepts: JSON.parse((piece.concepts as string) || "[]"),
         resources: resources.results,
         model_used: (piece.model_used as string | null) ?? null,
@@ -228,9 +233,13 @@ briefingReadRoutes.get("/briefing/:date", async (c) => {
       )
         .bind(piece.id)
         .all();
+      // Defensive strip of `<cite>` tags from historical pieces the
+      // writer leaked them into. New generations are already clean
+      // (see services/content-cleanup.ts); this catches anything
+      // persisted before the fix shipped.
       return {
         ...piece,
-        content: JSON.parse((piece.content as string) || "[]"),
+        content: stripCiteTags(JSON.parse((piece.content as string) || "[]") as ContentBlock[]),
         concepts: JSON.parse((piece.concepts as string) || "[]"),
         resources: resources.results,
         model_used: (piece.model_used as string | null) ?? null,

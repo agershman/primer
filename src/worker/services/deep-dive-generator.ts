@@ -4,6 +4,7 @@ import { recordTokenUsage } from "../db/queries.js";
 import type { LLMClient, ModelSpec } from "../integrations/llm/types.js";
 import { supportsWebSearch } from "../integrations/web-search.js";
 import type { ContentBlock, Resource } from "../types.js";
+import { stripCiteTags } from "./content-cleanup.js";
 
 export interface VisualAide {
   type: "diagram" | "table" | "comparison" | "flowchart";
@@ -83,6 +84,7 @@ CITATIONS AND LINKS:
 - NEVER link to company homepages, Wikipedia articles, or generic marketing pages.
 - If you cannot point to a specific source for a claim, do NOT create a link — just state the fact.
 - Resources at the end should be pages the reader can actually learn from.
+- Do NOT wrap cited spans in \`<cite>\` tags, \`[1]\`-style footnote markers, or any other inline citation markup. The web_search tool's results are captured separately and surfaced to the reader as a list of consulted sources beneath your prose — your job is to write clean readable prose, not to annotate which spans came from which result.
 
 GLOSSARY TERMS — define jargon the reader (per ABOUT) might not know:
 - Wrap any term, acronym, or phrase the reader might not know in the marker [[term||short definition]]. The frontend renders these as the term with a dotted underline; hovering shows the definition in a tooltip.
@@ -147,7 +149,13 @@ Now go deeper. Cover implementation details, edge cases, tradeoffs, and real-wor
 
   await recordTokenUsage(db, userId, "deep_dive_generation", spec, usage);
 
-  const wordCount = result.content
+  // Defensive: strip any `<cite>` tags the model wrapped around cited
+  // spans (see `content-cleanup.ts` for the full rationale). The
+  // actual citations come back on `webSearchResults` and surface as
+  // `web`-type resources below.
+  const cleanedContent = stripCiteTags(result.content);
+
+  const wordCount = cleanedContent
     .filter((b) => b.type === "text")
     .reduce((sum, b) => sum + b.value.split(/\s+/).length, 0);
   const readTime = Math.max(2, Math.ceil(wordCount / 200));
@@ -166,7 +174,7 @@ Now go deeper. Cover implementation details, edge cases, tradeoffs, and real-wor
     .map((w) => ({ label: w.title || w.url, url: w.url, type: "web" as const }));
 
   return {
-    content: result.content,
+    content: cleanedContent,
     resources: [...writerResources, ...webResources],
     visualAides: [],
     readTimeMinutes: readTime,
