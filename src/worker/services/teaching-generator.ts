@@ -207,15 +207,16 @@ Content can include code blocks (type "code" with a language) and mermaid diagra
 
   // Render the source bundle the writer can ground company-internal
   // claims in. Sources without a stable id fall back to their URL.
-  const bundleLines = (options.sourceContext ?? [])
-    .map((s) => {
-      const key = (s as { id?: string; url?: string }).id ?? (s as { url?: string }).url;
-      const title = (s as { title?: string }).title ?? "";
-      const label = key ? `${(s as { type: string }).type}:${key}` : (s as { type: string }).type;
-      return `  - ${label}${title ? ` — ${title}` : ""}`;
-    });
+  const bundleLines = (options.sourceContext ?? []).map((s) => {
+    const key = (s as { id?: string; url?: string }).id ?? (s as { url?: string }).url;
+    const title = (s as { title?: string }).title ?? "";
+    const label = key ? `${(s as { type: string }).type}:${key}` : (s as { type: string }).type;
+    return `  - ${label}${title ? ` — ${title}` : ""}`;
+  });
   if (bundleLines.length > 0) {
-    sourceContextLines.push(`Sources available for grounding (company-internal — use these for ticket/incident/team specifics, never invent them):\n${bundleLines.join("\n")}`);
+    sourceContextLines.push(
+      `Sources available for grounding (company-internal — use these for ticket/incident/team specifics, never invent them):\n${bundleLines.join("\n")}`,
+    );
   }
 
   const userMessage = `Write a ${pieceType} teaching piece about "${target.conceptName}" (category: ${target.category ?? "general"}).

@@ -99,4 +99,3 @@ export interface Resource {
   url: string;
   type: "linear" | "slack" | "incident" | "docs" | "article" | "pr" | "notion" | "google_doc" | "web" | "other";
 }
-

@@ -53,21 +53,22 @@ settingsRoutes.patch("/settings", async (c) => {
 
   if (budgetCap !== undefined) {
     const val = Number(budgetCap);
-    if (isNaN(val) || val < 0) return c.json({ error: "budgetCapMonthly must be a non-negative number" }, 400);
+    if (Number.isNaN(val) || val < 0) return c.json({ error: "budgetCapMonthly must be a non-negative number" }, 400);
     updates.push("budget_cap_monthly = ?");
     binds.push(val);
   }
 
   if (relevanceThreshold !== undefined) {
     const val = Number(relevanceThreshold);
-    if (isNaN(val) || val < 0 || val > 1) return c.json({ error: "relevanceThreshold must be between 0 and 1" }, 400);
+    if (Number.isNaN(val) || val < 0 || val > 1)
+      return c.json({ error: "relevanceThreshold must be between 0 and 1" }, 400);
     updates.push("relevance_threshold = ?");
     binds.push(val);
   }
 
   if (nearMissFloor !== undefined) {
     const val = Number(nearMissFloor);
-    if (isNaN(val) || val < 0 || val > 1) return c.json({ error: "nearMissFloor must be between 0 and 1" }, 400);
+    if (Number.isNaN(val) || val < 0 || val > 1) return c.json({ error: "nearMissFloor must be between 0 and 1" }, 400);
     updates.push("near_miss_floor = ?");
     binds.push(val);
   }

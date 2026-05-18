@@ -118,12 +118,11 @@ Include at least one diagram (type "diagram" with mermaid syntax) or code block 
 
   // Render the parent piece's source bundle for company-internal
   // grounding. External claims go through `web_search` instead.
-  const bundleLines = (options.sources ?? [])
-    .map((s) => {
-      const key = s.id ?? s.url;
-      const label = key ? `${s.type}:${key}` : s.type;
-      return `  - ${label}${s.title ? ` — ${s.title}` : ""}`;
-    });
+  const bundleLines = (options.sources ?? []).map((s) => {
+    const key = s.id ?? s.url;
+    const label = key ? `${s.type}:${key}` : s.type;
+    return `  - ${label}${s.title ? ` — ${s.title}` : ""}`;
+  });
   const bundleBlock =
     bundleLines.length > 0
       ? `\n\nSources available for grounding (company-internal — use these for ticket/incident/team specifics, never invent them):\n${bundleLines.join("\n")}`

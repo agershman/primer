@@ -69,9 +69,7 @@ briefingReadRoutes.get("/briefing/today", async (c) => {
     return c.json({ briefing: null, pieces: [], quiz: null });
   }
 
-  const pieces = await c.env.DB.prepare(
-    `SELECT * FROM teaching_pieces WHERE briefing_id = ? ORDER BY position DESC`,
-  )
+  const pieces = await c.env.DB.prepare(`SELECT * FROM teaching_pieces WHERE briefing_id = ? ORDER BY position DESC`)
     .bind(briefing.id)
     .all();
 
@@ -219,9 +217,7 @@ briefingReadRoutes.get("/briefing/:date", async (c) => {
     return c.json({ error: "No briefing for this date" }, 404);
   }
 
-  const pieces = await c.env.DB.prepare(
-    `SELECT * FROM teaching_pieces WHERE briefing_id = ? ORDER BY position DESC`,
-  )
+  const pieces = await c.env.DB.prepare(`SELECT * FROM teaching_pieces WHERE briefing_id = ? ORDER BY position DESC`)
     .bind(briefing.id)
     .all();
 

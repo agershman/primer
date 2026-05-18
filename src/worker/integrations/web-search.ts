@@ -47,4 +47,3 @@ export function supportsWebSearch(spec: ModelSpec): boolean {
 export function parseWebEvidence(response: NormalizedMessageResponse): WebSearchResult[] {
   return response.webSearchResults ?? [];
 }
-

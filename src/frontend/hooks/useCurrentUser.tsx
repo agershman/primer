@@ -108,5 +108,5 @@ export function useIsAdmin(): boolean {
  * slot needs to be preserved.
  */
 export function AdminOnly({ children, fallback = null }: { children: ReactNode; fallback?: ReactNode }) {
-  return useIsAdmin() ? <>{children}</> : <>{fallback}</>;
+  return useIsAdmin() ? children : fallback;
 }

@@ -54,10 +54,8 @@ import {
   getAllConcepts,
   getRecentBriefingConceptIds,
   isBudgetExceeded,
-  recordTokenUsage,
 } from "../db/queries.js";
 import { llmClient } from "../integrations/llm/dispatcher.js";
-import type { ModelSpec } from "../integrations/llm/types.js";
 import { type SourceFetchContext, sourceRegistry, type WorkContextItem } from "../sources/index.js";
 import { type Env, singletonSourceKey, type UserSettings } from "../types.js";
 import { userToday } from "../util/time.js";

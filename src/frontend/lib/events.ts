@@ -61,15 +61,15 @@
  */
 export interface PrimerEvents {
   /** Open the chat panel. Fires from CommandPalette + Header. */
-  "open-chat": void;
+  "open-chat": undefined;
   /** Open the Settings modal. Fires from CommandPalette + Header. */
-  "open-settings": void;
+  "open-settings": undefined;
   /** Open the focus editor (quick-edit modal). */
-  "open-focus-editor": void;
+  "open-focus-editor": undefined;
   /** Open the keyboard-shortcuts dialog. */
-  "open-shortcuts": void;
+  "open-shortcuts": undefined;
   /** Open the command palette itself (Cmd+K toggle). */
-  "open-command-palette": void;
+  "open-command-palette": undefined;
   /**
    * Site-wide light/dark theme changed. Per-block code-block
    * theme-toggles listen to this so they reset to "follow site"
@@ -129,7 +129,7 @@ export function primerEventName<E extends PrimerEventName>(name: E): `primer:${E
  */
 export function dispatchPrimerEvent<E extends PrimerEventName>(
   name: E,
-  ...args: PrimerEventPayload<E> extends void ? [] : [detail: PrimerEventPayload<E>]
+  ...args: PrimerEventPayload<E> extends undefined ? [] : [detail: PrimerEventPayload<E>]
 ): void {
   if (typeof window === "undefined") return;
   const detail = (args[0] ?? undefined) as PrimerEventPayload<E> | undefined;
@@ -144,7 +144,7 @@ export function dispatchPrimerEvent<E extends PrimerEventName>(
  */
 export function onPrimerEvent<E extends PrimerEventName>(
   name: E,
-  handler: PrimerEventPayload<E> extends void ? () => void : (detail: PrimerEventPayload<E>) => void,
+  handler: PrimerEventPayload<E> extends undefined ? () => void : (detail: PrimerEventPayload<E>) => void,
 ): () => void {
   if (typeof window === "undefined") return () => {};
   const wrapped = (event: Event) => {

@@ -491,12 +491,7 @@ export class OpenAIAdapter implements LLMClient {
    * lenient "strip markdown fences / slice outermost braces"
    * recovery the Anthropic path needs.
    */
-  async generateJson<T>({
-    spec,
-    system,
-    user,
-    maxTokens = 8192,
-  }: GenerateJsonOptions): Promise<GenerateJsonResult<T>> {
+  async generateJson<T>({ spec, system, user, maxTokens = 8192 }: GenerateJsonOptions): Promise<GenerateJsonResult<T>> {
     // `serverTools` is intentionally not forwarded — the chat-completions
     // endpoint doesn't host `web_search`. Callers gate on
     // `supportsWebSearch(spec)` (Anthropic-only today) before relying on
