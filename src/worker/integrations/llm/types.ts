@@ -111,8 +111,9 @@ export type ServerToolSpec = { kind: "web_search"; maxUses?: number };
 /**
  * Normalized result of a hosted web_search call. Both providers
  * surface citations inline in the assistant response; the adapter
- * extracts them into this shape so callers (today: the
- * piece-auditor) don't need to know which provider answered.
+ * extracts them into this shape so callers (today: the teaching
+ * piece + deep dive writers) don't need to know which provider
+ * answered.
  */
 export interface WebSearchResult {
   url: string;
@@ -178,6 +179,22 @@ export interface GenerateJsonOptions {
   system: string;
   user: string;
   maxTokens?: number;
+  /** Provider-hosted server tools (e.g. `web_search`) the model can
+   *  invoke while drafting the JSON response. Citations come back via
+   *  `webSearchResults` on the return value. Adapters that don't
+   *  support the requested tools (e.g. the OpenAI chat-completions
+   *  adapter for web_search) silently ignore them — callers should
+   *  gate on `supportsWebSearch(spec)` before relying on the result. */
+  serverTools?: ServerToolSpec[];
+}
+
+export interface GenerateJsonResult<T> {
+  result: T;
+  usage: NormalizedUsage;
+  /** Web-search citations the provider gathered while drafting, when
+   *  `serverTools` included `web_search` and the model invoked it.
+   *  Undefined when no server tools were requested or none ran. */
+  webSearchResults?: WebSearchResult[];
 }
 
 /**
@@ -188,5 +205,5 @@ export interface GenerateJsonOptions {
 export interface LLMClient {
   createMessage(opts: CreateMessageOptions): Promise<NormalizedMessageResponse>;
   streamMessage(opts: CreateMessageOptions): AsyncGenerator<StreamEvent>;
-  generateJson<T>(opts: GenerateJsonOptions): Promise<{ result: T; usage: NormalizedUsage }>;
+  generateJson<T>(opts: GenerateJsonOptions): Promise<GenerateJsonResult<T>>;
 }

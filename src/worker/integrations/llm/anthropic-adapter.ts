@@ -18,6 +18,7 @@ import type {
   ContentBlock,
   CreateMessageOptions,
   GenerateJsonOptions,
+  GenerateJsonResult,
   LLMClient,
   NormalizedMessageResponse,
   NormalizedUsage,
@@ -35,9 +36,10 @@ interface AnthropicWireUsage {
 
 /**
  * Citation block emitted by Anthropic's hosted `web_search_20250305`
- * tool. We don't render these inline — the auditor consumes them as
- * `WebSearchResult[]` evidence. Shape verified against the public
- * tool-use docs as of 2026-05.
+ * tool. We don't render these inline as content — writers consume
+ * them via `webSearchResults` on the normalized response and attach
+ * them to the piece's resource list. Shape verified against the
+ * public tool-use docs as of 2026-05.
  */
 interface AnthropicWebSearchResult {
   type: "web_search_tool_result";
@@ -294,19 +296,25 @@ export class AnthropicAdapter implements LLMClient {
     system,
     user,
     maxTokens = 8192,
-  }: GenerateJsonOptions): Promise<{ result: T; usage: NormalizedUsage }> {
+    serverTools,
+  }: GenerateJsonOptions): Promise<GenerateJsonResult<T>> {
     const response = await this.createMessage({
       spec,
       maxTokens,
       system: system + "\n\nRespond with valid JSON only. No markdown fences.",
       messages: [{ role: "user", content: user }],
+      ...(serverTools ? { serverTools } : {}),
     });
 
     const firstText = response.content.find((b): b is ContentBlock & { type: "text" } => b.type === "text");
     const text = firstText?.text ?? "{}";
     try {
       const result = parseClaudeJson<T>(text);
-      return { result, usage: response.usage };
+      return {
+        result,
+        usage: response.usage,
+        ...(response.webSearchResults ? { webSearchResults: response.webSearchResults } : {}),
+      };
     } catch (err) {
       console.error(
         "[anthropic] JSON parse failed, response length:",

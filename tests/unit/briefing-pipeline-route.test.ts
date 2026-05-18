@@ -7,10 +7,10 @@ import { briefingRoutes } from "../../src/worker/routes/briefing";
  *
  * The pipeline endpoint assembles a trace from five tables:
  * `briefings`, `briefing_timings`, `near_misses`, `discovered_items`,
- * and `teaching_pieces` (LEFT JOIN audits for the per-piece audit
- * summary). The shim below answers exactly those queries so the
- * test pins the wire contract — adding a new query in the handler
- * without adding a branch here is a deliberate failure signal.
+ * and `teaching_pieces`. The shim below answers exactly those queries
+ * so the test pins the wire contract — adding a new query in the
+ * handler without adding a branch here is a deliberate failure
+ * signal.
  */
 
 interface BriefingRow {
@@ -74,24 +74,12 @@ interface PieceRow {
   target_depth: number | null;
 }
 
-interface AuditRow {
-  target_kind: "piece" | "deep_dive" | "quiz";
-  target_id: string;
-  pass: number;
-  status: string;
-  total_claims: number;
-  patched_count: number;
-  dropped_count: number;
-  grounded_web_count: number;
-}
-
 class FakeD1 {
   briefings: BriefingRow[] = [];
   timings: TimingRow[] = [];
   nearMisses: NearMissRow[] = [];
   discovered: DiscoveredRow[] = [];
   pieces: PieceRow[] = [];
-  audits: AuditRow[] = [];
 
   prepare(sql: string) {
     const db = this;
@@ -128,29 +116,21 @@ class FakeD1 {
               rows.sort((a, b) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0));
               return { results: rows as unknown as T[] };
             }
-            if (normalized.startsWith("SELECT tp.id, tp.title, tp.selection_reasoning, tp.source_type,")) {
+            if (normalized.startsWith("SELECT id, title, selection_reasoning, source_type,")) {
               const [briefingId, userId] = params as [string, string];
               const rows = db.pieces
                 .filter((p) => p.briefing_id === briefingId && p.user_id === userId)
                 .sort((a, b) => a.position - b.position)
-                .map((p) => {
-                  const audit = db.audits.find((a) => a.target_kind === "piece" && a.target_id === p.id);
-                  return {
-                    id: p.id,
-                    title: p.title,
-                    selection_reasoning: p.selection_reasoning,
-                    source_type: p.source_type,
-                    series_id: p.series_id,
-                    part_number: p.part_number,
-                    position: p.position,
-                    target_depth: p.target_depth,
-                    audit_status: audit?.status ?? null,
-                    audit_total_claims: audit?.total_claims ?? null,
-                    audit_patched_count: audit?.patched_count ?? null,
-                    audit_dropped_count: audit?.dropped_count ?? null,
-                    audit_grounded_web_count: audit?.grounded_web_count ?? null,
-                  };
-                });
+                .map((p) => ({
+                  id: p.id,
+                  title: p.title,
+                  selection_reasoning: p.selection_reasoning,
+                  source_type: p.source_type,
+                  series_id: p.series_id,
+                  part_number: p.part_number,
+                  position: p.position,
+                  target_depth: p.target_depth,
+                }));
               return { results: rows as unknown as T[] };
             }
             throw new Error(`Unhandled SELECT (all) in FakeD1: ${normalized}`);
@@ -338,16 +318,6 @@ describe("GET /api/briefing/:id/pipeline", () => {
       position: 0,
       target_depth: 1.5,
     });
-    db.audits.push({
-      target_kind: "piece",
-      target_id: "tp_1",
-      pass: 1,
-      status: "clean",
-      total_claims: 4,
-      patched_count: 0,
-      dropped_count: 0,
-      grounded_web_count: 1,
-    });
 
     const { status, body } = await fetchJson(app, db, "/api/briefing/brf_1/pipeline");
     expect(status).toBe(200);
@@ -384,8 +354,8 @@ describe("GET /api/briefing/:id/pipeline", () => {
       { title: "Relevant article", sourceType: "rss", relevanceScore: 0.7 },
     ]);
 
-    const pieces = body.pieces as Array<{ id: string; auditSummary: { status: string; totalClaims: number } | null }>;
+    const pieces = body.pieces as Array<{ id: string; title: string }>;
     expect(pieces).toHaveLength(1);
-    expect(pieces[0].auditSummary).toMatchObject({ status: "clean", totalClaims: 4 });
+    expect(pieces[0]).toMatchObject({ id: "tp_1", title: "First piece" });
   });
 });

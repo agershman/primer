@@ -77,7 +77,6 @@ import { extractConcepts } from "./concept-extractor.js";
 import { type ClassificationResult, classifyDraft, findCandidatePredecessors } from "./continuation-classifier.js";
 import { runDecayJob } from "./depth-manager.js";
 import { type FocusScorerCandidate, scoreCandidatesAgainstFocus } from "./focus-scorer.js";
-import { auditPiece, auditQuiz } from "./piece-auditor.js";
 import { generateQuiz } from "./quiz-assessor.js";
 import { filterSlackByRelevance } from "./slack-relevance-filter.js";
 import { generateTeachingPiece } from "./teaching-generator.js";
@@ -211,11 +210,6 @@ export async function generateDailyBriefing(
     const quizGenerationSpec = resolveModel(surfaceMap, "quizGeneration");
     const continuationSpec = resolveModel(surfaceMap, "continuationClassifier");
     const focusScoringSpec = resolveModel(surfaceMap, "focusScoring");
-    const auditSpec = resolveModel(surfaceMap, "audit");
-    // Patch model defaults to the same model as the drafter (voice
-    // consistency) but can be overridden in
-    // Settings → Intelligence → AI models.
-    const auditPatchSpec = resolveModel(surfaceMap, "auditPatch");
     // Persisted on the briefing row for analytics. Stored as a flat
     // `<operation>: <model>` map for backwards compatibility with older
     // briefings; PR 2 will widen this to capture provider + reasoning.
@@ -226,8 +220,6 @@ export async function generateDailyBriefing(
       quizGeneration: quizGenerationSpec.model,
       continuationClassifier: continuationSpec.model,
       focusScoring: focusScoringSpec.model,
-      audit: auditSpec.model,
-      auditPatch: auditPatchSpec.model,
     };
 
     await updateProgress(db, briefingId, "work_context", "Fetching work context…");
@@ -1112,15 +1104,12 @@ export async function generateDailyBriefing(
       );
 
       // Writing is done for this batch; the inner loop now runs the
-      // continuation classifier, optional regen, and the audit pass.
-      // Update the progress label so the user sees "Auditing" rather
-      // than a stale "Writing" while the audit (the slowest of the
-      // three) is running.
+      // continuation classifier and optional rewrite.
       await updateProgress(
         db,
         briefingId,
         "generating_pieces",
-        `Auditing ${range} of ${selected.length}: ${batch.map((t) => t.conceptName).join(", ")}`,
+        `Reviewing ${range} of ${selected.length}: ${batch.map((t) => t.conceptName).join(", ")}`,
         pieceDetails,
         true,
       );
@@ -1128,7 +1117,7 @@ export async function generateDailyBriefing(
       for (const { target, pieceStep, pieceStartedAt } of batchResults) {
         // Pin the writer's wall-clock finish before the classifier
         // runs so the per-piece duration in the trace stays scoped
-        // to the writer alone (audit + classifier get their own
+        // to the writer alone (the classifier gets its own
         // accounting). The recordTiming call moves below so we can
         // fold in the classifier verdict; passing `finishedAt`
         // explicitly preserves the original duration.
@@ -1207,8 +1196,8 @@ export async function generateDailyBriefing(
           // Record per-piece timing now that we know the classifier
           // verdict, but pin `finishedAt` to the writer's wall clock
           // so the duration in the trace is just the writer call
-          // (audit + the optional continuation rewrite get their own
-          // rows / fall under generating_pieces accounting).
+          // (the optional continuation rewrite falls under
+          // generating_pieces accounting).
           await recordTiming(db, {
             briefingId,
             userId,
@@ -1307,60 +1296,6 @@ export async function generateDailyBriefing(
 
           pieceDetails.push(`✓ ${piece.title} (${piece.pieceType}, ${piece.readTimeMinutes}m)`);
           const pieceId = genId("teachingPiece");
-
-          // ── Audit pass ──
-          // Runs after the writer + continuation rewrite, BEFORE the
-          // insert, so the persisted content reflects any patches /
-          // drops the auditor applied. Audit rows are written to the
-          // `audits` + `audit_claims` tables under the pieceId we just
-          // minted. The auditor catches its own internal exceptions and
-          // returns a status='failed' summary; this outer try/catch is
-          // the belt to that suspenders — code paths in `auditContent`
-          // run BEFORE its internal try (e.g. `withStrippedContent` and
-          // the `audits` INSERT itself if the table is missing) can
-          // still throw, and losing a whole briefing because the audit
-          // tripped is the wrong failure mode. On a throw here, log and
-          // publish the unaudited piece.
-          const auditStartedAt = Date.now();
-          try {
-            const audited = await auditPiece({
-              db,
-              userId,
-              llm,
-              targetId: pieceId,
-              content: piece.content,
-              sources: target.sourceContext ?? [],
-              auditSpec,
-              patchSpec: auditPatchSpec,
-            });
-            piece = { ...piece, content: audited.content };
-            await recordTiming(db, {
-              briefingId,
-              userId,
-              stepKey: "piece_audit",
-              startedAt: auditStartedAt,
-              itemsProcessed: audited.audit.total_claims,
-              modelUsed: auditSpec.model,
-              metadata: {
-                status: audited.audit.status,
-                patched: audited.audit.patched_count,
-                dropped: audited.audit.dropped_count,
-                grounded_web: audited.audit.grounded_web_count,
-                used_web_search: audited.audit.used_web_search,
-              },
-            });
-          } catch (err) {
-            console.warn("[briefing] audit step threw; publishing unaudited piece:", err);
-            await recordTiming(db, {
-              briefingId,
-              userId,
-              stepKey: "piece_audit",
-              startedAt: auditStartedAt,
-              itemsProcessed: 0,
-              modelUsed: auditSpec.model,
-              metadata: { status: "failed", threw: true },
-            });
-          }
 
           // Derive the piece's due_at + due_reason from its sources.
           // When multiple sources have deadlines, we pick the SOONEST as
@@ -1483,54 +1418,6 @@ export async function generateDailyBriefing(
           .bind(briefingId, `%${lowestDepthTarget.conceptId}%`)
           .first<{ id: string }>();
 
-        // Audit the question text against the web-search backstop.
-        // Quizzes have no local source bundle by construction — the
-        // backstop is the only verification primitive available, so
-        // `auditQuiz` forces `enableWebSearch=true` internally.
-        // Same belt-and-suspenders rationale as the piece audit above:
-        // an unhandled throw here used to sink the whole briefing.
-        const quizAuditStartedAt = Date.now();
-        let auditedQuestion = quizStep.data.question;
-        try {
-          const auditedQuiz = await auditQuiz({
-            db,
-            userId,
-            llm,
-            targetId: quizId,
-            content: [{ type: "text", value: quizStep.data.question }],
-            auditSpec,
-            patchSpec: auditPatchSpec,
-          });
-          auditedQuestion =
-            auditedQuiz.content[0]?.value && auditedQuiz.content[0].value.length > 0
-              ? auditedQuiz.content[0].value
-              : quizStep.data.question;
-          await recordTiming(db, {
-            briefingId,
-            userId,
-            stepKey: "quiz_audit",
-            startedAt: quizAuditStartedAt,
-            itemsProcessed: auditedQuiz.audit.total_claims,
-            modelUsed: auditSpec.model,
-            metadata: {
-              status: auditedQuiz.audit.status,
-              patched: auditedQuiz.audit.patched_count,
-              dropped: auditedQuiz.audit.dropped_count,
-            },
-          });
-        } catch (err) {
-          console.warn("[briefing] quiz audit step threw; publishing unaudited question:", err);
-          await recordTiming(db, {
-            briefingId,
-            userId,
-            stepKey: "quiz_audit",
-            startedAt: quizAuditStartedAt,
-            itemsProcessed: 0,
-            modelUsed: auditSpec.model,
-            metadata: { status: "failed", threw: true },
-          });
-        }
-
         await db
           .prepare(
             `INSERT INTO calibration_quizzes
@@ -1543,7 +1430,7 @@ export async function generateDailyBriefing(
             userId,
             lowestDepthTarget.conceptId,
             pieceForConcept?.id ?? null,
-            auditedQuestion,
+            quizStep.data.question,
             quizStep.data.context,
             JSON.stringify(quizStep.data.expectedDepthIndicators),
             quizStep.data.modelUsed,

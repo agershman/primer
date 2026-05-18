@@ -33,10 +33,10 @@ import { OpenAIAdapter } from "./openai-adapter.js";
 import type {
   CreateMessageOptions,
   GenerateJsonOptions,
+  GenerateJsonResult,
   LLMClient,
   ModelSpec,
   NormalizedMessageResponse,
-  NormalizedUsage,
   ProviderId,
   StreamEvent,
 } from "./types.js";
@@ -108,7 +108,7 @@ class DispatchingLLMClient implements LLMClient {
     yield* adapter.streamMessage(opts);
   }
 
-  async generateJson<T>(opts: GenerateJsonOptions): Promise<{ result: T; usage: NormalizedUsage }> {
+  async generateJson<T>(opts: GenerateJsonOptions): Promise<GenerateJsonResult<T>> {
     return this.adapterFor(opts.spec).generateJson<T>(opts);
   }
 }

@@ -2,6 +2,7 @@ import { DEPTH_LABELS } from "../config/constants.js";
 import { DEFAULT_MODELS, lookupCatalogById } from "../config/models.js";
 import { recordTokenUsage } from "../db/queries.js";
 import type { LLMClient, ModelSpec } from "../integrations/llm/types.js";
+import { supportsWebSearch } from "../integrations/web-search.js";
 import type { ContentBlock, Resource } from "../types.js";
 
 export interface VisualAide {
@@ -27,14 +28,11 @@ export interface DeepDiveOptions {
   /** "About me" persona — tailors voice / depth assumptions to the reader. */
   aboutStatement?: string | null;
   /**
-   * Source bundle inherited from the parent teaching piece. Before the
-   * audit feature deep dives received only `conceptName + parent text`
-   * — every factual claim was effectively unanchored. Threading the
-   * parent's `source_context` here lets the writer cite the same
-   * underlying signals via `[[ref:...]]` tags, and the auditor verifies
-   * against the same bundle. Optional because the regenerate path can
-   * still call us without sources; the auditor will then rely on its
-   * web-search backstop instead.
+   * Source bundle inherited from the parent teaching piece. Used for
+   * company-internal facts (ticket / incident / team specifics). For
+   * external technical claims the writer is told to reach for the
+   * hosted `web_search` tool. Optional because the regenerate path can
+   * still call us without sources.
    */
   sources?: Array<{ type: string; id?: string; url?: string; title?: string; summary?: string }>;
 }
@@ -75,19 +73,16 @@ CODE AND TECHNICAL DETAIL — route on the ABOUT block:
 - If the reader is **non-technical**: prefer prose. Use mermaid diagrams instead of code where possible — they communicate architecture and flow without requiring code literacy. If you must reference code (e.g. a PR snippet on the source ticket the deep dive grew from), introduce it with one line of plain-English context first. Inline \`code\` is fine for product / system / config names the reader will encounter in their tools.
 - When uncertain, lean toward fewer code snippets and more diagrams + prose — code that doesn't earn its space hurts a deep dive more than it helps.
 
+GROUNDING — every factual claim must be anchored:
+1. For company-internal facts (project names, team behavior, incident details, ticket status, internal metrics, named individuals): use ONLY the supplied parent-piece source bundle below. Do NOT search the web for these — you will not find them. If the bundle doesn't cover an internal claim, qualify it or omit it.
+2. For external technical claims (version numbers, vendor behavior, public APIs, RFCs, well-known incidents, library defaults, syntax): prefer the source bundle when it covers the claim. Otherwise invoke the \`web_search\` tool to verify against official docs, RFCs, vendor changelogs, or the project's own repo. Deep dives benefit most from this — go beyond the supplied bundle when the topic warrants it. Prefer authoritative primary sources over blog posts.
+3. If you cannot anchor a claim either way, qualify it ("some teams report...", "in many setups...") or omit it. Never assert a specific percentage, version, vendor behavior, date, or quote you have not verified.
+
 CITATIONS AND LINKS:
 - ONLY use inline links ({{Label||url}}) when you can point to a SPECIFIC page: official docs, a blog post, an RFC, a GitHub repo, a paper, or release notes.
 - NEVER link to company homepages, Wikipedia articles, or generic marketing pages.
 - If you cannot point to a specific source for a claim, do NOT create a link — just state the fact.
-- If you are uncertain whether something is accurate, qualify it rather than asserting it as fact.
 - Resources at the end should be pages the reader can actually learn from.
-
-INLINE REF TAGS — anchoring claims to the parent piece's source bundle:
-- When a sentence makes a factual claim that comes from the source bundle below (the same one that drove the parent teaching piece), append an inline ref tag at the end of that sentence using the format \`[[ref:<enrichment-id>]]\`.
-- The \`<enrichment-id>\` MUST be one of the allowed IDs supplied in the user message — do NOT invent IDs.
-- Place the tag IMMEDIATELY before the closing punctuation. The frontend strips the tags from rendered text and uses them to drive the audit indicator + per-claim popover.
-- If a claim is background knowledge the source bundle doesn't speak to, DO NOT add a tag — the auditor will flag fabricated citations. The auditor will instead use a web-search backstop to verify un-tagged claims.
-- Apply to \`text\` and \`heading\` blocks only. Do NOT embed tags in \`code\` or \`diagram\` blocks.
 
 GLOSSARY TERMS — define jargon the reader (per ABOUT) might not know:
 - Wrap any term, acronym, or phrase the reader might not know in the marker [[term||short definition]]. The frontend renders these as the term with a dotted underline; hovering shows the definition in a tooltip.
@@ -121,18 +116,17 @@ Include at least one diagram (type "diagram" with mermaid syntax) or code block 
     .join(" ")
     .slice(0, 500);
 
-  // Mirror teaching-generator: surface the allowed enrichment IDs the
-  // writer can use in `[[ref:...]]` tags.
-  const allowedRefs = (options.sources ?? [])
+  // Render the parent piece's source bundle for company-internal
+  // grounding. External claims go through `web_search` instead.
+  const bundleLines = (options.sources ?? [])
     .map((s) => {
       const key = s.id ?? s.url;
-      if (!key) return null;
-      return `  - ${s.type}:${key}${s.title ? ` — ${s.title}` : ""}`;
-    })
-    .filter((line): line is string => line !== null);
-  const allowedRefsBlock =
-    allowedRefs.length > 0
-      ? `\n\nAllowed [[ref:...]] IDs (use any sentence-tag verbatim from this list, no others):\n${allowedRefs.join("\n")}`
+      const label = key ? `${s.type}:${key}` : s.type;
+      return `  - ${label}${s.title ? ` — ${s.title}` : ""}`;
+    });
+  const bundleBlock =
+    bundleLines.length > 0
+      ? `\n\nSources available for grounding (company-internal — use these for ticket/incident/team specifics, never invent them):\n${bundleLines.join("\n")}`
       : "";
 
   const userMessage = `Write a deep-dive expansion for "${conceptName}".
@@ -140,12 +134,17 @@ Include at least one diagram (type "diagram" with mermaid syntax) or code block 
 The reader already saw this summary:
 "${existingSummary}"
 
-Now go deeper. Cover implementation details, edge cases, tradeoffs, and real-world patterns.${allowedRefsBlock}`;
+Now go deeper. Cover implementation details, edge cases, tradeoffs, and real-world patterns.${bundleBlock}`;
 
-  const { result, usage } = await llm.generateJson<{
+  const { result, usage, webSearchResults } = await llm.generateJson<{
     content: ContentBlock[];
     resources: Resource[];
-  }>({ spec, system, user: userMessage });
+  }>({
+    spec,
+    system,
+    user: userMessage,
+    ...(supportsWebSearch(spec) ? { serverTools: [{ kind: "web_search", maxUses: 4 }] } : {}),
+  });
 
   await recordTokenUsage(db, userId, "deep_dive_generation", spec, usage);
 
@@ -154,13 +153,22 @@ Now go deeper. Cover implementation details, edge cases, tradeoffs, and real-wor
     .reduce((sum, b) => sum + b.value.split(/\s+/).length, 0);
   const readTime = Math.max(2, Math.ceil(wordCount / 200));
 
+  const writerResources: Resource[] = (result.resources ?? []).map((r) => ({
+    label: r.label,
+    url: r.url,
+    type: r.type ?? "other",
+  }));
+
+  // Append public sources the writer consulted via `web_search` during
+  // drafting, de-duplicated against URLs the writer already cited.
+  const seenUrls = new Set(writerResources.map((r) => r.url));
+  const webResources: Resource[] = (webSearchResults ?? [])
+    .filter((w) => w.url && !seenUrls.has(w.url))
+    .map((w) => ({ label: w.title || w.url, url: w.url, type: "web" as const }));
+
   return {
     content: result.content,
-    resources: (result.resources ?? []).map((r) => ({
-      label: r.label,
-      url: r.url,
-      type: r.type ?? "other",
-    })),
+    resources: [...writerResources, ...webResources],
     visualAides: [],
     readTimeMinutes: readTime,
     modelUsed: spec.model,

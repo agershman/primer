@@ -24,9 +24,7 @@ export type ModelOperation =
   | "deepDive"
   | "quizGeneration"
   | "quizAssessment"
-  | "chat"
-  | "audit"
-  | "auditPatch";
+  | "chat";
 
 export interface ModelsSettings {
   conceptExtraction?: string;
@@ -43,17 +41,6 @@ export interface ModelsSettings {
    * AI Models panel.
    */
   continuationClassifier?: string;
-  /**
-   * Post-generation content auditor — classifies each factual claim
-   * against the source bundle. Defaults to Haiku; cheap classification
-   * task. See `src/worker/services/piece-auditor.ts`.
-   */
-  audit?: string;
-  /**
-   * Patches flagged claims into defensible form. Defaults to the
-   * same model as `teachingPiece` so the rewrite stays in voice.
-   */
-  auditPatch?: string;
   /**
    * Default TTS voice id — used as the catch-all when an operation
    * doesn't have its own override below. Belongs alongside the LLM
@@ -129,14 +116,6 @@ export interface UserSettingsData {
    * miss — see `shared/sources.ts` for the canonical list.
    */
   enabledSourceIds: SourceId[];
-  /**
-   * Per-user toggle for the inline wavy-underline audit marks on
-   * teaching pieces, deep dives, and quizzes. Defaults to true (the
-   * audit signal is the headline trust feature). Disabling hides
-   * inline marks but keeps the `AuditIndicator` pill visible — the
-   * full trail is still one click away.
-   */
-  showAuditMarks: boolean;
 }
 
 export interface AvailableModel {
@@ -299,7 +278,6 @@ const DEFAULT_SETTINGS: UserSettingsData = {
   filterPrompt: null,
   sourceFilterOverrides: {},
   enabledSourceIds: [],
-  showAuditMarks: false,
 };
 
 export function useSettings(): UseSettingsResult {
@@ -317,8 +295,6 @@ export function useSettings(): UseSettingsResult {
     quizGeneration: "",
     quizAssessment: "",
     chat: "",
-    audit: "",
-    auditPatch: "",
   });
   const [previewState, setPreviewState] = useState<PreviewState>(INITIAL_PREVIEW);
 
@@ -351,7 +327,6 @@ export function useSettings(): UseSettingsResult {
       enabledSourceIds: Array.isArray(s.enabledSourceIds)
         ? (s.enabledSourceIds.filter((v): v is SourceId => typeof v === "string") as SourceId[])
         : [],
-      showAuditMarks: s.showAuditMarks ?? DEFAULT_SETTINGS.showAuditMarks,
     };
   }, []);
 

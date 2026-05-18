@@ -191,9 +191,7 @@ export type ModelOperation =
   | "quizAssessment"
   | "chat"
   | "continuationClassifier"
-  | "focusScoring"
-  | "audit"
-  | "auditPatch";
+  | "focusScoring";
 
 export const DEFAULT_MODELS: Record<ModelOperation, ModelId> = {
   conceptExtraction: "claude-haiku-4-5-20251001",
@@ -212,17 +210,6 @@ export const DEFAULT_MODELS: Record<ModelOperation, ModelId> = {
   // scoring (short JSON, structured output), so Haiku is the right
   // default tier.
   focusScoring: "claude-haiku-4-5-20251001",
-  // Per-claim classifier that runs after every generator. Short
-  // structured JSON output, no creative writing — Haiku is the right
-  // default tier and keeps the per-piece overhead small relative to
-  // the drafter it gates.
-  audit: "claude-haiku-4-5-20251001",
-  // Rewrites flagged spans into defensible form. Defaults to the
-  // same model as `teachingPiece` so a patched sentence reads in
-  // the same voice as the surrounding paragraph. Admins who pick
-  // a different drafter and want the patcher to follow can update
-  // both rows in Settings → Intelligence → AI models.
-  auditPatch: "claude-sonnet-4-20250514",
 };
 
 /**

@@ -102,32 +102,6 @@ export interface PrimerEvents {
     surface?: "teachingPiece" | "deepDive" | "chat";
     voiceId: string;
   };
-  /**
-   * A wavy-underline audit mark was clicked. The popover host
-   * (`AuditPopover` mounted once per piece) listens for this and
-   * opens the popover anchored to the matching span. `claimId`
-   * resolves to the `audit_claims` row; the lookup is local to the
-   * piece's already-loaded `AuditTrail` so no extra round trip.
-   */
-  "audit-mark-clicked": {
-    targetKind: "piece" | "deep_dive" | "quiz";
-    targetId: string;
-    claimId: string;
-    /** The DOM element that was clicked — used as the popover anchor. */
-    anchor: HTMLElement;
-  };
-  /**
-   * The per-piece "Show audit marks" toggle was flipped (from the
-   * AuditIndicator dropdown). RichText instances on the same page
-   * listen and re-render their inline marks accordingly. `targetId`
-   * scopes the change so a flip on one piece doesn't bleed into
-   * another piece's marks.
-   */
-  "audit-marks-visibility-changed": {
-    targetKind: "piece" | "deep_dive" | "quiz";
-    targetId: string;
-    visible: boolean;
-  };
 }
 
 /** All known event names. */

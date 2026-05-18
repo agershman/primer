@@ -27,7 +27,6 @@
 import { Hono } from "hono";
 import type { Env, UserContext } from "../types.js";
 import { pieceAudioRoutes } from "./pieces/audio.js";
-import { pieceAuditRoutes } from "./pieces/audit.js";
 import { pieceDeepDiveRoutes } from "./pieces/deep-dive.js";
 import { pieceFeedbackReadRoutes } from "./pieces/feedback-read.js";
 import { pieceRegenerateRoutes } from "./pieces/regenerate.js";
@@ -39,4 +38,3 @@ pieceRoutes.route("/", pieceFeedbackReadRoutes);
 pieceRoutes.route("/", pieceDeepDiveRoutes);
 pieceRoutes.route("/", pieceRegenerateRoutes);
 pieceRoutes.route("/", pieceAudioRoutes);
-pieceRoutes.route("/", pieceAuditRoutes);

@@ -38,6 +38,7 @@ import type {
   ContentBlock,
   CreateMessageOptions,
   GenerateJsonOptions,
+  GenerateJsonResult,
   LLMClient,
   NormalizedMessageResponse,
   NormalizedUsage,
@@ -495,7 +496,11 @@ export class OpenAIAdapter implements LLMClient {
     system,
     user,
     maxTokens = 8192,
-  }: GenerateJsonOptions): Promise<{ result: T; usage: NormalizedUsage }> {
+  }: GenerateJsonOptions): Promise<GenerateJsonResult<T>> {
+    // `serverTools` is intentionally not forwarded — the chat-completions
+    // endpoint doesn't host `web_search`. Callers gate on
+    // `supportsWebSearch(spec)` (Anthropic-only today) before relying on
+    // citation output, so silently dropping the option here is correct.
     let lastError: Error | null = null;
     for (let attempt = 0; attempt < RETRY_CONFIG.MAX_ATTEMPTS; attempt++) {
       const controller = new AbortController();
